@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extracta // AI Question Paper Curiosity Portal</title>
+    <meta name="description" content="Upload any university question paper PDF and instantly explore it as an interactive, AI-structured academic portal.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <!-- marked.js: Markdown -> HTML -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+    <!-- MathJax: LaTeX typesetting -->
+    <script>
+      window.MathJax = {
+        tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+        options: { skipHtmlTags: ['script','noscript','style','textarea','pre'] },
+        startup: { ready() { MathJax.startup.defaultReady(); } }
+      };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" async></script>
+</head>
+<body>
+    <div class="cosmos-bg"></div>
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+
+    <div class="app-container">
+
+        <!-- ── HEADER ──────────────────────────────────────────── -->
+        <header class="main-header">
+            <div class="logo-area">
+                <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                    <polyline points="2 17 12 22 22 17"></polyline>
+                    <polyline points="2 12 12 17 22 12"></polyline>
+                </svg>
+                <div class="logo-text">
+                    <h1>EXTRACTA</h1>
+                    <span class="sub-logo">CURIOSITY PORTAL</span>
+                </div>
+            </div>
+            <div class="header-tagline">
+                Transforming rigid exam structures into fields of active discovery.
+            </div>
+        </header>
+
+        <!-- ── MAIN DASHBOARD ──────────────────────────────────── -->
+        <main class="dashboard-grid">
+
+            <!-- ── LEFT PANEL — Control ────────────────────────── -->
+            <section class="control-panel glass-card">
+                <div class="section-title">
+                    <svg class="title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    <h2>Ingestion Sanctuary</h2>
+                </div>
+
+                <!-- University Selector -->
+                <div class="university-selector-block">
+                    <label class="field-label" for="university-select">
+                        <svg class="field-label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                            <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                        </svg>
+                        Select University
+                    </label>
+                    <div class="segmented-control" id="university-control">
+                        <button class="seg-btn active" data-value="mumbai" id="seg-mumbai">
+                            Mumbai University
+                        </button>
+                        <button class="seg-btn" data-value="generic" id="seg-generic">
+                            Generic / Other
+                        </button>
+                    </div>
+                    <span class="university-hint" id="university-hint">
+                        Tuned for Mumbai University paper format with QP Code, Semester, Scheme extraction.
+                    </span>
+                </div>
+
+                <!-- Drag and Drop Upload Zone -->
+                <div class="upload-zone" id="upload-zone">
+                    <input type="file" id="file-input" accept=".pdf" class="hidden-input">
+                    <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="12" y1="18" x2="12" y2="12"></line>
+                        <line x1="9" y1="15" x2="15" y2="15"></line>
+                    </svg>
+                    <p class="upload-prompt">Drop question paper PDF here or <span class="highlight">browse files</span></p>
+                    <span class="upload-hint">Supported: PDF only</span>
+                </div>
+
+                <!-- Pipeline Visualizer (hidden until upload) -->
+                <div class="pipeline-wrapper hidden" id="pipeline-wrapper">
+                    <div class="pipeline-header">
+                        <h3>Agent Graph Execution</h3>
+                        <span class="status-badge pulse-blue" id="global-status-badge">Processing</span>
+                    </div>
+
+                    <div class="agent-graph">
+                        <div class="node-track"></div>
+                        <div class="graph-node" data-node="pdf_ingestion" id="node-pdf_ingestion">
+                            <div class="node-dot"></div><span class="node-label">Ingesting PDF</span>
+                        </div>
+                        <div class="graph-node" data-node="ocr" id="node-ocr">
+                            <div class="node-dot"></div><span class="node-label">Running OCR</span>
+                        </div>
+                        <div class="graph-node" data-node="cleaning" id="node-cleaning">
+                            <div class="node-dot"></div><span class="node-label">LLM Cleaning</span>
+                        </div>
+                        <div class="graph-node" data-node="header_extraction" id="node-header_extraction">
+                            <div class="node-dot"></div><span class="node-label">Header Extraction</span>
+                        </div>
+                        <div class="graph-node" data-node="normalization" id="node-normalization">
+                            <div class="node-dot"></div><span class="node-label">Normalization</span>
+                        </div>
+                        <div class="graph-node" data-node="structure" id="node-structure">
+                            <div class="node-dot"></div><span class="node-label">Groq JSON Structuring</span>
+                        </div>
+                        <div class="graph-node" data-node="diagram" id="node-diagram">
+                            <div class="node-dot"></div><span class="node-label">Cropping Visuals</span>
+                        </div>
+                        <div class="graph-node" data-node="flatten" id="node-flatten">
+                            <div class="node-dot"></div><span class="node-label">Flattening Data</span>
+                        </div>
+                        <div class="graph-node" data-node="excel_writer" id="node-excel_writer">
+                            <div class="node-dot"></div><span class="node-label">Writing Excel</span>
+                        </div>
+                        <div class="graph-node" data-node="validation" id="node-validation">
+                            <div class="node-dot"></div><span class="node-label">Verifying</span>
+                        </div>
+                    </div>
+
+                    <!-- Telemetry Stream -->
+                    <div class="agent-logs-panel">
+                        <h4>Telemetry Stream</h4>
+                        <div class="log-stream" id="log-stream">
+                            <div class="log-line system">[System] Ready to ingest document...</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ── RIGHT PANEL — Explorer ───────────────────────── -->
+            <section class="explorer-panel glass-card" id="explorer-panel">
+                <!-- Empty state -->
+                <div class="empty-state-explorer" id="empty-state-explorer">
+                    <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                    </svg>
+                    <h3>Portal Offline</h3>
+                    <p>Awaiting question paper upload to illuminate the interactive academic explorer.</p>
+                </div>
+
+                <!-- Active explorer (hidden until complete) -->
+                <div class="tome-explorer hidden" id="tome-explorer">
+
+                    <!-- Metadata header card — common fields -->
+                    <div class="tome-header-card">
+                        <div class="metadata-grid" id="metadata-grid">
+                            <div class="meta-item">
+                                <span class="meta-label">SUBJECT</span>
+                                <span class="meta-val" id="meta-subject">—</span>
+                            </div>
+                            <div class="meta-item">
+                                <span class="meta-label">PAPER CODE</span>
+                                <span class="meta-val code-font" id="meta-paper-code">—</span>
+                            </div>
+                            <div class="meta-item">
+                                <span class="meta-label">MAX MARKS</span>
+                                <span class="meta-val code-font" id="meta-max-marks">—</span>
+                            </div>
+                            <div class="meta-item">
+                                <span class="meta-label">TIME</span>
+                                <span class="meta-val" id="meta-time">—</span>
+                            </div>
+                            <div class="meta-item">
+                                <span class="meta-label">DATE</span>
+                                <span class="meta-val" id="meta-date">—</span>
+                            </div>
+                            <div class="meta-item">
+                                <span class="meta-label">QP CODE</span>
+                                <span class="meta-val code-font" id="meta-qp-code">—</span>
+                            </div>
+                        </div>
+
+                        <!-- Mumbai-specific extra row (hidden by default) -->
+                        <div class="metadata-grid mumbai-extra hidden" id="mumbai-extra-row">
+                            <div class="meta-item">
+                                <span class="meta-label">BRANCH</span>
+                                <span class="meta-val" id="meta-branch">—</span>
+                            </div>
+                            <div class="meta-item">
+                                <span class="meta-label">SEMESTER</span>
+                                <span class="meta-val code-font" id="meta-semester">—</span>
+                            </div>
+                            <div class="meta-item">
+                                <span class="meta-label">SCHEME</span>
+                                <span class="meta-val" id="meta-scheme">—</span>
+                            </div>
+                            <div class="meta-item meta-item-wide">
+                                <span class="meta-label">NOTE / INSTRUCTIONS</span>
+                                <span class="meta-val meta-note" id="meta-note">—</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Questions explorer (Full Width) -->
+                    <div class="questions-hierarchy-full">
+                        <div class="panel-section-title">
+                            <h3>Interactive Academic Explorer</h3>
+                            <span class="q-count-badge" id="q-count-badge">0 Questions</span>
+                        </div>
+                        <div class="hierarchy-tree" id="questions-tree-container"></div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="tome-actions-panel">
+                        <button class="btn btn-primary btn-glow" id="download-excel-btn">
+                            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                                <line x1="16" y1="13" x2="8" y2="13"></line>
+                                <line x1="16" y1="17" x2="8" y2="17"></line>
+                            </svg>
+                            Download Structured Worksheet (.xlsx)
+                        </button>
+
+                        <!-- Generate Model Answers button -->
+                        <button class="btn btn-answers btn-glow" id="generate-answers-btn">
+                            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                                <path d="M2 17l10 5 10-5"></path>
+                                <path d="M2 12l10 5 10-5"></path>
+                            </svg>
+                            Generate AI Model Answer Sheet
+                        </button>
+
+                        <!-- Answer Generation Status Panel -->
+                        <div class="answers-status-panel hidden" id="answers-status-panel">
+                            <div class="answers-status-header">
+                                <span class="answers-status-icon pulse-ring" id="answers-status-icon"></span>
+                                <span class="answers-status-text" id="answers-status-text">Initialising answer agent...</span>
+                            </div>
+                            <div class="answers-progress-bar-bg">
+                                <div class="answers-progress-bar-fill" id="answers-progress-bar" style="width:0%"></div>
+                            </div>
+                        </div>
+
+                        <!-- Download Answer Sheet PDF button (hidden until ready) -->
+                        <button class="btn btn-download-answers btn-glow hidden" id="download-answers-btn">
+                            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                            Download Model Answer Sheet PDF
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
