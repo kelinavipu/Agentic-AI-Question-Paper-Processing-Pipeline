@@ -1609,26 +1609,31 @@ def sanitize_for_pdf(text: str) -> str:
     }
     for orig, rep in replacements.items():
         text = text.replace(orig, rep)
-    return text.encode("latin-1", errors="ignore").decode("latin-1")
+    return text
 
 
 class ModelAnswersPDF(FPDF):
     def __init__(self, subject_title: str = "EXAMINATION"):
         super().__init__()
+        import os
+        if os.path.exists(r"C:\Windows\Fonts\nirmala.ttf"):
+            self.add_font("nirmala", "", r"C:\Windows\Fonts\nirmala.ttf")
+            self.add_font("nirmala", "B", r"C:\Windows\Fonts\nirmalab.ttf")
+            self.add_font("nirmala", "I", r"C:\Windows\Fonts\nirmala.ttf")
         self.subject_title = sanitize_for_pdf(subject_title)
 
     def header(self):
         self.set_fill_color(15, 23, 42)
         self.rect(0, 0, 210, 14, "F")
         self.set_text_color(255, 255, 255)
-        self.set_font("times", "B", 9)
+        self.set_font("nirmala", "B", 9)
         self.set_xy(0, 2)
         self.cell(210, 10, "UNIVERSITY MODEL ANSWER SHEET -- EXTRACTA AI", align="C")
         self.ln(16)
 
     def footer(self):
         self.set_y(-14)
-        self.set_font("times", "I", 8)
+        self.set_font("nirmala", "I", 8)
         self.set_text_color(128, 128, 128)
         self.cell(0, 10, f"Page {self.page_no()}/{{nb}}", align="C")
 
@@ -1658,7 +1663,7 @@ def write_markdown_to_pdf(pdf: FPDF, text: str):
     table_data = []
     line_h = 5
 
-    pdf.set_font("times", "", 10)
+    pdf.set_font("nirmala", "", 10)
     pdf.set_text_color(30, 41, 59)
 
     def _flush_table():
@@ -1682,13 +1687,13 @@ def write_markdown_to_pdf(pdf: FPDF, text: str):
             if in_table:
                 _flush_table()
             heading = line.strip("= ").strip()
-            pdf.set_font("times", "B", 11)
+            pdf.set_font("nirmala", "B", 11)
             pdf.set_fill_color(230, 235, 248)
             pdf.set_text_color(40, 50, 120)
             pdf.set_x(pdf.l_margin)
             pdf.cell(0, 7, sanitize_for_pdf(heading), fill=True)
             pdf.ln(8)
-            pdf.set_font("times", "", 10)
+            pdf.set_font("nirmala", "", 10)
             pdf.set_text_color(30, 41, 59)
             continue
 
@@ -1696,23 +1701,23 @@ def write_markdown_to_pdf(pdf: FPDF, text: str):
         if line.startswith("### "):
             if in_table: _flush_table()
             heading = _strip_inline_md(line[4:])
-            pdf.set_font("times", "B", 11)
+            pdf.set_font("nirmala", "B", 11)
             pdf.set_text_color(79, 70, 229)
             pdf.set_x(pdf.l_margin)
             pdf.cell(0, 7, sanitize_for_pdf(heading))
             pdf.ln(8)
-            pdf.set_font("times", "", 10)
+            pdf.set_font("nirmala", "", 10)
             pdf.set_text_color(30, 41, 59)
             continue
         elif line.startswith("## ") or line.startswith("# "):
             if in_table: _flush_table()
             heading = _strip_inline_md(line[3:] if line.startswith("## ") else line[2:])
-            pdf.set_font("times", "B", 12)
+            pdf.set_font("nirmala", "B", 12)
             pdf.set_text_color(60, 80, 200)
             pdf.set_x(pdf.l_margin)
             pdf.cell(0, 8, sanitize_for_pdf(heading))
             pdf.ln(9)
-            pdf.set_font("times", "", 10)
+            pdf.set_font("nirmala", "", 10)
             pdf.set_text_color(30, 41, 59)
             continue
 
@@ -1731,7 +1736,7 @@ def write_markdown_to_pdf(pdf: FPDF, text: str):
         # Numbered list: 1. 2. 3.
         if re.match(r'^\d+\.\s', line):
             clean = sanitize_for_pdf(_strip_inline_md(line))
-            pdf.set_font("times", "", 10)
+            pdf.set_font("nirmala", "", 10)
             pdf.set_text_color(30, 41, 59)
             pdf.set_x(pdf.l_margin + 3)
             pdf.multi_cell(0, line_h, clean)
@@ -1741,7 +1746,7 @@ def write_markdown_to_pdf(pdf: FPDF, text: str):
         # Bullet points: - or *
         if re.match(r'^[\-\*\+]\s', line):
             clean = sanitize_for_pdf(_strip_inline_md(line[2:]))
-            pdf.set_font("times", "", 10)
+            pdf.set_font("nirmala", "", 10)
             pdf.set_text_color(30, 41, 59)
             pdf.set_x(pdf.l_margin + 2)
             pdf.write(line_h, "-  ")
@@ -1753,17 +1758,17 @@ def write_markdown_to_pdf(pdf: FPDF, text: str):
         is_bold = re.match(r'^\*\*(.+)\*\*$', line)
         if is_bold:
             clean = sanitize_for_pdf(is_bold.group(1))
-            pdf.set_font("times", "B", 10)
+            pdf.set_font("nirmala", "B", 10)
             pdf.set_text_color(30, 41, 59)
             pdf.set_x(pdf.l_margin)
             pdf.multi_cell(0, line_h, clean)
-            pdf.set_font("times", "", 10)
+            pdf.set_font("nirmala", "", 10)
             pdf.ln(1)
             continue
 
         # Regular paragraph text
         clean = sanitize_for_pdf(_strip_inline_md(line))
-        pdf.set_font("times", "", 10)
+        pdf.set_font("nirmala", "", 10)
         pdf.set_text_color(30, 41, 59)
         pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, line_h, clean)
@@ -1790,11 +1795,11 @@ def _render_table(pdf: FPDF, rows: List[List[str]]):
 
         is_header = (row_idx == 0)
         if is_header:
-            pdf.set_font("times", "B", 9)
+            pdf.set_font("nirmala", "B", 9)
             pdf.set_fill_color(215, 225, 248)
             pdf.set_text_color(15, 23, 42)
         else:
-            pdf.set_font("times", "", 9)
+            pdf.set_font("nirmala", "", 9)
             fill_r = (245, 247, 252) if row_idx % 2 == 0 else (255, 255, 255)
             pdf.set_fill_color(*fill_r)
             pdf.set_text_color(30, 41, 59)
@@ -1836,18 +1841,18 @@ def compile_answers_pdf(results: List[Dict[str, Any]], header: Dict[str, str], t
     pdf.add_page()
 
     # ── Title ──────────────────────────────────────────────────────
-    pdf.set_font("times", "B", 15)
+    pdf.set_font("nirmala", "B", 15)
     pdf.set_text_color(15, 23, 42)
     pdf.multi_cell(0, 10, sanitize_for_pdf(f"Model Answer Sheet: {subject}"), align="C")
     pdf.ln(3)
 
     # ── Metadata box (simple two-column rows using set_x + cell + ln) ──
     def meta_row(label: str, value: str):
-        pdf.set_font("times", "B", 9)
+        pdf.set_font("nirmala", "B", 9)
         pdf.set_text_color(71, 85, 105)
         pdf.set_x(18)
         pdf.cell(55, 6, sanitize_for_pdf(label))
-        pdf.set_font("times", "", 9)
+        pdf.set_font("nirmala", "", 9)
         pdf.set_text_color(15, 23, 42)
         pdf.cell(120, 6, sanitize_for_pdf(value))
         pdf.ln(6)
@@ -1879,7 +1884,7 @@ def compile_answers_pdf(results: List[Dict[str, Any]], header: Dict[str, str], t
         options = item.get("options", [])
 
         # Question heading bar — amber for MCQ, default for others
-        pdf.set_font("times", "B", 11)
+        pdf.set_font("nirmala", "B", 11)
         if cat == "MCQ":
             pdf.set_fill_color(254, 243, 199)   # amber-50
             pdf.set_text_color(120, 60, 0)
@@ -1892,19 +1897,19 @@ def compile_answers_pdf(results: List[Dict[str, Any]], header: Dict[str, str], t
         pdf.ln(9)
 
         # Question text in italics
-        pdf.set_font("times", "I", 10)
+        pdf.set_font("nirmala", "I", 10)
         pdf.set_text_color(71, 85, 105)
         pdf.multi_cell(0, 5, sanitize_for_pdf(f'"{text}"'))
         pdf.ln(3)
 
         # For MCQ: list the options before the answer
         if cat == "MCQ" and options:
-            pdf.set_font("times", "B", 9)
+            pdf.set_font("nirmala", "B", 9)
             pdf.set_text_color(120, 70, 10)
             pdf.cell(0, 6, "OPTIONS:")
             pdf.ln(6)
             for opt in options:
-                pdf.set_font("times", "", 9)
+                pdf.set_font("nirmala", "", 9)
                 pdf.set_text_color(30, 41, 59)
                 pdf.set_x(pdf.l_margin + 6)
                 pdf.cell(0, 5, sanitize_for_pdf(f"  ({opt['letter']})  {opt['text']}"))
@@ -1912,7 +1917,7 @@ def compile_answers_pdf(results: List[Dict[str, Any]], header: Dict[str, str], t
             pdf.ln(2)
 
         # Model Answer label
-        pdf.set_font("times", "B", 10)
+        pdf.set_font("nirmala", "B", 10)
         if cat == "MCQ":
             pdf.set_text_color(120, 70, 10)
             pdf.cell(0, 6, "ANSWER ANALYSIS:")
