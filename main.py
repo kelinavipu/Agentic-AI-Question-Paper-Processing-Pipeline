@@ -174,7 +174,7 @@ async def download_excel(task_id: str):
     header = task["result"].get("header", {})
     slug   = _make_filename_slug(header, task_id)
     return FileResponse(path=excel_path,
-                        filename=f"Extracta_{slug}.xlsx",
+                        filename=os.path.basename(excel_path),
                         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
@@ -302,7 +302,7 @@ async def download_answers_pdf(task_id: str):
     header = tasks_db.get(task_id, {}).get("result", {}).get("header", {})
     slug   = _make_filename_slug(header, task_id)
     return FileResponse(path=pdf_path,
-                        filename=f"Extracta_ModelAnswers_{slug}.pdf",
+                        filename=os.path.basename(pdf_path),
                         media_type="application/pdf")
 
 
