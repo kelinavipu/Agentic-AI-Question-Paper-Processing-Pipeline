@@ -710,3 +710,183 @@ body {
     object-fit: contain;
     padding: 1rem;
 }
+
+/* ── MCQ NODE STYLES ─────────────────────────────────────────── */
+.question-tome-node.mcq-node {
+    border-left: 3px solid rgba(245, 158, 11, 0.5);
+    background: rgba(245, 158, 11, 0.025);
+}
+.question-tome-node.mcq-node:hover {
+    border-left-color: rgba(245, 158, 11, 0.75);
+    background: rgba(245, 158, 11, 0.04);
+}
+.mcq-options-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-top: 0.65rem;
+    padding-top: 0.55rem;
+    border-top: 1px solid rgba(245, 158, 11, 0.12);
+}
+.mcq-option-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    padding: 0.3rem 0.55rem;
+    border-radius: var(--radius-sm);
+    background: rgba(245, 158, 11, 0.06);
+    border: 1px solid rgba(245, 158, 11, 0.1);
+    transition: var(--trans);
+}
+.mcq-option-item:hover {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.28);
+}
+.mcq-option-letter {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--amber);
+    background: rgba(245, 158, 11, 0.14);
+    border-radius: 50%;
+    width: 1.35rem;
+    height: 1.35rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 0.05rem;
+}
+.mcq-option-text {
+    font-size: 0.85rem;
+    color: var(--text-1);
+    line-height: 1.45;
+}
+
+/* ── NODE TYPE BADGES ────────────────────────────────────────── */
+.node-type-badge {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.12rem 0.42rem;
+    border-radius: 99px;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+.badge-mcq {
+    background: rgba(245, 158, 11, 0.14);
+    color: var(--amber);
+    border: 1px solid rgba(245, 158, 11, 0.28);
+}
+.badge-short {
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--green);
+    border: 1px solid rgba(16, 185, 129, 0.22);
+}
+
+/* ── EXTRA INFO TOGGLE ROW ───────────────────────────────────── */
+.extra-info-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin-top: 0.7rem;
+    padding-top: 0.55rem;
+    border-top: 1px solid rgba(255,255,255,0.045);
+}
+.extra-info-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    user-select: none;
+}
+.toggle-switch {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    border-radius: 99px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.1);
+    cursor: pointer;
+    transition: background 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+    flex-shrink: 0;
+    outline: none;
+}
+.toggle-switch:focus-visible {
+    box-shadow: 0 0 0 2px var(--indigo);
+}
+.toggle-switch.on {
+    background: linear-gradient(135deg, var(--indigo), var(--violet));
+    border-color: transparent;
+    box-shadow: 0 0 10px rgba(99,102,241,0.4);
+}
+.toggle-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.22s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+}
+.toggle-switch.on .toggle-knob {
+    transform: translateX(16px);
+}
+.toggle-status-text {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--text-3);
+    transition: color 0.2s ease;
+    min-width: 1.8rem;
+    user-select: none;
+}
+.toggle-switch.on ~ .toggle-status-text {
+    color: #818cf8;
+}
+
+/* ── ABVV METADATA ROW ──────────────────────────────────────── */
+.metadata-grid.abvv-extra {
+    grid-template-columns: 1fr 1fr 1fr 1fr 2fr;
+    margin-top: 0;
+    border-top: 1px solid rgba(6, 182, 212, 0.15);
+    padding-top: 0.75rem;
+}
+.abvv-extra .meta-label {
+    color: rgba(6, 182, 212, 0.7);
+}
+.abvv-extra .meta-val {
+    color: #a5f3fc;
+}
+
+/* ABVV segment button — teal accent when active */
+#seg-abvv.active {
+    background: linear-gradient(135deg, #0891b2, #0e7490);
+    color: #fff;
+    box-shadow: 0 2px 10px rgba(8, 145, 178, 0.40);
+}
+
+/* University badge chip displayed in the explorer header — ABVV variant */
+.abvv-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.15rem 0.5rem;
+    border-radius: 99px;
+    background: rgba(6, 182, 212, 0.1);
+    color: #22d3ee;
+    border: 1px solid rgba(6, 182, 212, 0.25);
+    margin-left: 0.4rem;
+    vertical-align: middle;
+}
+

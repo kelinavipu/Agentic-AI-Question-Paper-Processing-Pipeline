@@ -28,6 +28,7 @@ function initUniversitySelector() {
 
     const hints = {
         mumbai:  "Tuned for Mumbai University format: QP Code, Semester, Scheme, Branch, Compulsory Note.",
+        abvv:    "ABVV (Atal Bihari Vajpayee Vishwavidyalaya): SI codes, bilingual Hindi+English papers, Section A/B with MCQ + descriptive, OR alternatives.",
         generic: "Generic mode: extracts subject, code, date, marks, and time from any standard paper."
     };
 
@@ -199,6 +200,10 @@ function renderMetadata(h, university) {
     set("meta-date",       h.date);
     set("meta-qp-code",    h.qp_code);
 
+    // Hide all extra rows first
+    document.getElementById("mumbai-extra-row")?.classList.add("hidden");
+    document.getElementById("abvv-extra-row")?.classList.add("hidden");
+
     // Mumbai-specific extras
     if (university === "mumbai") {
         set("meta-branch",   h.branch);
@@ -206,6 +211,18 @@ function renderMetadata(h, university) {
         set("meta-scheme",   h.scheme);
         set("meta-note",     h.note);
         document.getElementById("mumbai-extra-row").classList.remove("hidden");
+    }
+
+    // ABVV-specific extras
+    if (university === "abvv") {
+        set("meta-abvv-semester",  h.semester);
+        set("meta-abvv-session",   h.exam_session || h.date);
+        set("meta-abvv-examtype",  h.exam);
+        set("meta-abvv-papertype", h.paper_type || h.scheme);
+        set("meta-abvv-note",      h.note);
+        // Also show SI paper code prominently in the QP code slot
+        if (!h.qp_code && h.paper_code) set("meta-qp-code", h.paper_code);
+        document.getElementById("abvv-extra-row").classList.remove("hidden");
     }
 }
 
@@ -238,10 +255,16 @@ function renderTree(tree) {
 
     function walk(nodeMap, depth) {
         Object.entries(nodeMap).forEach(([key, node]) => {
+            const nodeType = node.type || "descriptive";
+
+            // Skip MCQ option nodes — they are rendered inside their parent MCQ card
+            if (nodeType === "mcq_option") return;
+
             totalCount++;
             const levelClass = `level-${Math.min(depth, 4)}`;
             const card = document.createElement("div");
             card.className = `question-tome-node ${levelClass}`;
+            if (nodeType === "mcq") card.classList.add("mcq-node");
 
             // Strip leading key from the text if it appears at the very start
             let displayText = (node.text || "").trim();
@@ -251,58 +274,128 @@ function renderTree(tree) {
             const marksHtml = node.marks != null && node.marks !== ""
                 ? `<span class="node-marks">${node.marks}M</span>` : "";
 
-            // Use marked.js to render question text as markdown (handles tables, formulas, bold, etc.)
+            // Type badge
+            let typeBadgeHtml = "";
+            if (nodeType === "mcq") {
+                typeBadgeHtml = `<span class="node-type-badge badge-mcq">MCQ</span>`;
+            } else if (nodeType === "short") {
+                typeBadgeHtml = `<span class="node-type-badge badge-short">Short</span>`;
+            }
+
+            // Use marked.js to render question text as markdown
             const renderedText = renderMarkdown(displayText);
+
+            // Determine if this is a LEAF MCQ (has direct A/B/C/D options)
+            // vs a CONTAINER MCQ (like Q1 that holds sub-questions i, ii, iii...)
+            const hasMcqOptions = nodeType === "mcq" && node.subs &&
+                Object.values(node.subs).some(s => s.type === "mcq_option");
+            const hasSubQuestions = node.subs &&
+                Object.values(node.subs).some(s => s.type !== "mcq_option");
+
+            // MCQ options rendered as choice bubbles — ONLY for leaf MCQs
+            let optionsHtml = "";
+            if (hasMcqOptions) {
+                const optionItems = Object.entries(node.subs)
+                    .filter(([, ov]) => ov.type === "mcq_option")
+                    .map(([ol, ov]) =>
+                        `<div class="mcq-option-item">
+                            <span class="mcq-option-letter">${escapeHtml(ol)}</span>
+                            <span class="mcq-option-text">${escapeHtml(ov.text || "")}</span>
+                        </div>`
+                    ).join("");
+                if (optionItems) {
+                    optionsHtml = `<div class="mcq-options-grid">${optionItems}</div>`;
+                }
+            }
+
+            // Extra Info toggle (only for leaf/sub nodes, not top-level Q headers)
+            const canShowSpark = depth > 1 && nodeType !== "mcq_option";
+            const extraInfoHtml = canShowSpark ? `
+                <div class="extra-info-toggle-row" data-card-id="${escapeHtml(key)}-${depth}">
+                    <span class="extra-info-label">Extra Info</span>
+                    <div class="toggle-switch" role="switch" aria-checked="false" tabindex="0" id="toggle-${escapeHtml(key)}-${depth}">
+                        <div class="toggle-knob"></div>
+                    </div>
+                    <span class="toggle-status-text" id="toggle-text-${escapeHtml(key)}-${depth}">Off</span>
+                </div>` : "";
 
             card.innerHTML = `
                 <div class="node-content-row">
                     <span class="node-key-label">${escapeHtml(key)}</span>
-                    <div class="node-question-text markdown-body">${renderedText}</div>
-                    <div class="node-right-meta">${marksHtml}</div>
-                </div>`;
+                    <div class="node-question-text markdown-body">${renderedText}${optionsHtml}</div>
+                    <div class="node-right-meta">${typeBadgeHtml}${marksHtml}</div>
+                </div>
+                ${extraInfoHtml}`;
 
             // Typeset any math in this question card
             retypeset(card);
 
-            card.addEventListener("click", (e) => {
-                // Ignore clicks originating inside the inline sparks panel itself
-                if (e.target.closest(".inline-sparks-wrapper")) {
-                    return;
+            // Wire up Extra Info toggle
+            if (canShowSpark) {
+                const toggleEl = card.querySelector(`#toggle-${CSS.escape(key)}-${depth}`);
+                const toggleText = card.querySelector(`#toggle-text-${CSS.escape(key)}-${depth}`);
+
+                if (toggleEl) {
+                    const activateSpark = () => {
+                        const isOn = toggleEl.getAttribute("aria-checked") === "true";
+                        const newState = !isOn;
+                        toggleEl.setAttribute("aria-checked", String(newState));
+                        toggleEl.classList.toggle("on", newState);
+                        if (toggleText) toggleText.textContent = newState ? "On" : "Off";
+
+                        // Remove existing spark wrapper if present
+                        const existing = card.querySelector(".inline-sparks-wrapper");
+                        if (existing) existing.remove();
+
+                        if (newState) {
+                            // Close other open sparks in the tree
+                            document.querySelectorAll(".question-tome-node").forEach(n => {
+                                if (n !== card) {
+                                    const otherToggle = n.querySelector(".toggle-switch");
+                                    const otherText = n.querySelector(".toggle-status-text");
+                                    const otherWrapper = n.querySelector(".inline-sparks-wrapper");
+                                    if (otherToggle) {
+                                        otherToggle.setAttribute("aria-checked", "false");
+                                        otherToggle.classList.remove("on");
+                                    }
+                                    if (otherText) otherText.textContent = "Off";
+                                    if (otherWrapper) otherWrapper.remove();
+                                }
+                            });
+
+                            card.classList.add("selected");
+                            const wrapper = document.createElement("div");
+                            wrapper.className = "inline-sparks-wrapper";
+                            card.appendChild(wrapper);
+
+                            // Show diagram visuals if question mentions them
+                            const hasVisuals = /diagram|circuit|figure|draw|sketch|table|waveform|flowchart|schematic|network|gate|karnaugh|k-map|truth/i
+                                .test(node.text || displayText);
+                            if (hasVisuals && activeDiagrams.length > 0) {
+                                showDiagramsInWrapper(wrapper);
+                            }
+
+                            triggerInlineSpark(node.text || displayText, wrapper);
+                        } else {
+                            card.classList.remove("selected");
+                        }
+                    };
+
+                    toggleEl.addEventListener("click", e => { e.stopPropagation(); activateSpark(); });
+                    toggleEl.addEventListener("keydown", e => {
+                        if (e.key === " " || e.key === "Enter") { e.preventDefault(); activateSpark(); }
+                    });
                 }
-
-                const isAlreadySelected = card.classList.contains("selected");
-
-                // Close and clean up all other open spark panels in the tree
-                document.querySelectorAll(".question-tome-node").forEach(n => {
-                    n.classList.remove("selected");
-                    const wrapper = n.querySelector(".inline-sparks-wrapper");
-                    if (wrapper) wrapper.remove();
-                });
-
-                // Skip overview for level-1 nodes (main question headers like Q1, Q2)
-                if (depth === 1) return;
-
-                // Toggle logic: only open if it wasn't already selected
-                if (!isAlreadySelected) {
-                    card.classList.add("selected");
-                    const wrapper = document.createElement("div");
-                    wrapper.className = "inline-sparks-wrapper";
-                    card.appendChild(wrapper);
-
-                    // Show relevant diagram images if question mentions visuals
-                    const hasVisuals = /diagram|circuit|figure|draw|sketch|table|waveform|flowchart|schematic|network|gate|karnaugh|k-map|truth/i
-                        .test(node.text || displayText);
-                    if (hasVisuals && activeDiagrams.length > 0) {
-                        showDiagramsInWrapper(wrapper);
-                    }
-
-                    triggerInlineSpark(node.text || displayText, wrapper);
-                }
-            });
+            }
 
             container.appendChild(card);
 
-            if (node.subs && Object.keys(node.subs).length > 0) {
+            // Recurse into subs:
+            // - Always recurse for non-MCQ nodes
+            // - Recurse for CONTAINER MCQs (sub-questions like i, ii, iii)
+            // - SKIP recursion only for LEAF MCQs (direct A/B/C/D options already rendered as bubbles)
+            const shouldRecurse = node.subs && Object.keys(node.subs).length > 0 && !hasMcqOptions;
+            if (shouldRecurse) {
                 walk(node.subs, depth + 1);
             }
         });

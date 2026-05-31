@@ -52,19 +52,25 @@ def _find_tesseract() -> str:
 
 pytesseract.pytesseract.tesseract_cmd = _find_tesseract()
 
+def build_llm(api_key: str, temp: float = 0.0, model_name: str = "llama-3.3-70b-versatile"):
+    if not api_key:
+        return None
+    return ChatGroq(model=model_name, temperature=temp, api_key=api_key)
+
 # Summary / Spark LLM key (GROQ_SUMMARY_KEY in .env)
 GROQ_SUMMARY_KEY = (
     os.environ.get("GROQ_SUMMARY_KEY")
     or os.environ.get("GROQ_API_KEY", "")
 )
 
-try:
-    LLM = ChatGroq(model="llama-3.3-70b-versatile", temperature=0, api_key=GROQ_SUMMARY_KEY)
+if GROQ_SUMMARY_KEY:
+    LLM = build_llm(GROQ_SUMMARY_KEY)
     LLM_AVAILABLE = True
-    print("[Extracta Agent] Groq LLM (summarykey) initialized successfully.")
-except Exception as e:
+    print("[Extracta Agent] LLM initialized successfully.")
+else:
+    LLM = None
     LLM_AVAILABLE = False
-    print(f"[Extracta Agent] WARNING: Groq LLM initialization failed: {e}")
+    print("[Extracta Agent] WARNING: LLM initialization failed: No API Key found.")
 
 OUTPUT_DIR = "output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -191,9 +197,73 @@ def _extract_header_mumbai(text: str) -> Dict[str, str]:
     return h
 
 
+def _extract_header_abvv(text: str) -> Dict[str, str]:
+    """
+    Tuned for ABVV (Atal Bihari Vajpayee Vishwavidyalaya) exam paper format.
+    """
+    h = dict(
+        paper_code="", subject="", date="", exam="",
+        max_marks="", time="", qp_code="",
+        semester="", scheme="", branch="",
+        exam_session="", paper_type="", note=""
+    )
+
+    # SI code / Paper code — e.g. SI-003457
+    if m := re.search(r"\b(SI[-\s]?\d{4,8})\b", text, re.I):
+        h["paper_code"] = m.group(1).strip().upper()
+        h["qp_code"] = h["paper_code"]
+
+    # Branch
+    if m := re.search(r"(?:B\.A\.|B\.Sc\.|B\.Com|B\.E\.|B\.Tech|M\.A\.|M\.Sc\.|M\.Com)[^\n]+", text, re.I):
+        h["branch"] = m.group(0).strip().rstrip('/')
+
+    # Subject — e.g. (G01) or (GO1) ELEMENTARY BOTANY (BOTANY)
+    if m := re.search(r"\([A-Z][A-Z0-9]*\)\s+([A-Za-z &\'\-\(\)]+)", text):
+        h["subject"] = m.group(1).strip()
+    elif m := re.search(r"Concept of Business|Business\s+\w+|Management\s+\w+", text, re.I):
+        h["subject"] = m.group(0).strip()
+
+    # Semester — First Semester, End Semester, etc.
+    if m := re.search(r"(First|Second|Third|Fourth|Fifth|Sixth|End|\d+(?:st|nd|rd|th))\s+Semester", text, re.I):
+        h["semester"] = m.group(0).strip()
+
+    # Exam session — e.g. December-2025-26
+    if m := re.search(r"(January|February|March|April|May|June|July|August|September|October|November|December)[-\s]\d{4}(?:[-–]\d{2,4})?", text, re.I):
+        h["exam_session"] = m.group(0).strip()
+        h["date"] = h["exam_session"]
+
+    # Exam type — Regular/PVT, etc.
+    if m := re.search(r"\((Regular(?:\s*/\s*PVT)?|Ex[-\s]?Regular|Private|PVT)\)", text, re.I):
+        h["exam"] = m.group(1).strip()
+
+    # Paper type / Scheme
+    if m := re.search(r"(Compulsory\s*/\s*Optional|Compulsory|Optional)", text, re.I):
+        h["paper_type"] = m.group(1).strip()
+        h["scheme"] = h["paper_type"]
+    if m := re.search(r"Course type\s*[:\-]?\s*([A-Za-z0-9]+)", text, re.I):
+        h["scheme"] = m.group(1).strip()
+
+    # Time
+    if m := re.search(r"Time\s*[:\-]?\s*([A-Za-z\d\.]+(?:\s+Hours?|\s+Hrs?))", text, re.I):
+        h["time"] = m.group(1).strip()
+
+    # Max Marks
+    if m := re.search(r"Max(?:imum)?[.\s]*Marks\s*[:\-]?\s*(\d+)", text, re.I):
+        h["max_marks"] = m.group(1)
+
+    # Note / Instructions
+    if m := re.search(r"Note\s*:\s*([A-Za-z].+?)(?:\n\s*(?:Section|खण्ड|1\.|Q|WQUS)|\n\n|$)", text, re.I | re.DOTALL):
+        raw = m.group(1).strip().replace("\n", " ")
+        h["note"] = raw[:350]
+
+    return h
+
+
 def _extract_header(text: str, university: str = "generic") -> Dict[str, str]:
     if university == "mumbai":
         return _extract_header_mumbai(text)
+    if university == "abvv":
+        return _extract_header_abvv(text)
     return _extract_header_generic(text)
 
 
@@ -201,64 +271,118 @@ def _extract_header(text: str, university: str = "generic") -> Dict[str, str]:
 # DEEP HIERARCHICAL STRUCTURE PARSING VIA GROQ LLM (JSON SCHEMA)
 # --------------------------------------------------------------------------
 
-STRUCTURE_PROMPT = """You are an expert academic document parser specializing in university exam papers, specifically in engineering, mathematics, computer science, and technology.
+STRUCTURE_PROMPT = """You are an expert academic document parser for university exam papers across engineering, sciences, commerce, and humanities.
 
-Given the following OCR-extracted text from a university exam paper body (the part AFTER the header), extract ALL questions into a perfectly structured JSON object.
+Given OCR-extracted text from a university exam paper body (AFTER the header), extract ALL questions into a perfectly structured JSON object.
 
-CRITICAL PARSING & TUNING RULES:
-1. QUESTION HIERARCHICAL STRUCTURE:
-   - Questions follow a strict nested hierarchy:
-     - Level 1 (Main Questions): Q1, Q2, Q3, Q4, Q5, Q6...
-     - Level 2 (Sub-questions): A, B, C, D  OR  a, b, c, d  OR  1, 2, 3, 4 (whichever is used)
-     - Level 3 (Sub-sub-questions): i, ii, iii, iv  OR  a, b, c  OR  1, 2, 3 (nested inside Level 2)
-     - Level 4 (Sub-sub-sub-questions): a, b  OR  i, ii  (nested inside Level 3)
-2. TABULAR DATA IN EXAMS:
-   - If a question contains a table (e.g., state transition table, truth table, data rows, cost matrices, analysis points), format the table beautifully as a clean markdown table (e.g., | State | Input | Next State |) within the "text" field of that question.
-3. MATHEMATICAL EQUATIONS & TECHNICAL FORMULAS:
-   - Clean and format mathematical symbols (e.g., theta, lambda, delta, pi, summation, integral, limits), exponents (e.g., x^2, e^-t), fractions (e.g., 1/2), and matrices. Use standard math notation or inline LaTeX ($...$) to ensure it reads cleanly and professionally. Fix split characters (like 'x 2' to 'x^2' or 'd/d t' to 'd/dt').
-4. CIRCUITS, NETWORK DIAGRAMS, AND VISUALS:
-   - Keep complete references to figures, schematics, circuit models, truth tables, or UML specifications (e.g. "For the circuit shown in Fig. 1...", "Find the transfer function for the network..."). Do not strip the visual descriptors.
-5. NODE CONTENT SCHEMA:
-   - Each node must contain: "text" (the question text, formatted with clean tables/equations if any), "marks" (integer or null if not found), "subs" (object of child nodes, empty {} if none).
-   - Marks are written as (5), [5], 5 marks, [10 marks] or sometimes at the end of a line. Extract only the number.
-   - If a question part is split across lines due to OCR noise, merge them into a single coherent paragraph.
-   - Return ONLY valid JSON. No markdown code fences, no explanation, just raw JSON.
-6. CRITICAL SPECIAL CASE — "Write short note on any N" / Comma-listed topics:
-   - ANY question that says "write short note on any N", "explain any N of the following", "attempt any N from", "write notes on any two", or lists topics after a colon like "Question: TopicA, TopicB, TopicC" MUST be split.
-   - The parent node text = the instruction part only (e.g. "Write short note on any 2 from the following:")
-   - EACH topic after the colon becomes its OWN child sub-node: "a", "b", "c", etc.
-   - Each child: { "text": "<topic name>", "marks": <parent_marks / N if calculable, else null>, "subs": {} }
-   - NEVER flatten a comma-separated topic list into one text field. This is the most common parsing error — avoid it.
-7. INLINE SUB-PART LISTS (a) ... (b) ... (c) ... on the same line:
-   - If a question includes inline labeled parts like "a) TopicA  b) TopicB" or "(i) ... (ii) ..."
-   - Split each into its own sub-node even if they appear on the same line in the OCR text.
+CRITICAL PARSING RULES:
 
-REQUIRED OUTPUT FORMAT (example):
+1. HIERARCHY:
+   Q1, Q2, Q3... are top-level keys.
+   Sub-questions use: i/ii/iii/iv/v (roman) OR a/b/c OR A/B/C (whichever appears).
+   MCQ options always use keys A/B/C/D inside "subs" of an MCQ node.
+
+2. BILINGUAL PAPERS (Hindi + English):
+   Many papers print Hindi first, then English for the SAME question.
+   RULE: Extract ONLY the English text. Discard ALL Hindi/Devanagari text completely.
+   Example: ignore "लघु पैमाने की इकाई के निम्न के संदर्भ में मापा" and use only "Small scale unit is measured in terms of:"
+
+3. MCQ DETECTION:
+   If choices are labeled (a)/(b)/(c)/(d) or (A)/(B)/(C)/(D): it is an MCQ.
+   Set type="mcq". Place each option as a child sub-node with keys A/B/C/D.
+   Parent text = English question stem only (before options).
+   Each option: { "text": "<English only>", "marks": null, "type": "mcq_option", "subs": {} }
+   MCQ options that are bilingual: use ONLY the English option text.
+
+4. ROMAN-NUMERAL SUB-QUESTIONS WITH MCQ OPTIONS:
+   Q1 often has sub-questions (i),(ii),(iii),(iv),(v) where each is an MCQ with (a)/(b)/(c)/(d).
+   Parse as: Q1.subs = { "i": {type:"mcq", subs:{"A":{...},"B":{...},"C":{...},"D":{...}}}, "ii":{...}, ... }
+   Roman numeral keys: "i", "ii", "iii", "iv", "v"
+   Option keys: "A", "B", "C", "D"
+
+5. OR / ALTERNATIVES (अथवा/OR):
+   When a question is followed by OR (or अथवा/OR), the alternate question uses key "Q<N>_OR".
+   Example: Q3 = main, Q3_OR = the OR alternative. Both are siblings at top level.
+
+6. SECTIONS AND UNITS:
+   Section-A/Section-B and Unit-I/Unit-II labels are just headers — do NOT create nodes for them.
+   All Q-numbered questions go directly as top-level keys.
+
+7. NODE SCHEMA:
+   Every node: { "text": "<English only>", "marks": <int or null>, "type": "mcq"|"mcq_option"|"descriptive"|"short", "subs": {} }
+   Default type = "descriptive" if unclear.
+   Marks from: (5) or [5] or "5 marks" or end of line. Per-question integer only.
+   Merge OCR-split lines into one clean sentence.
+   Return ONLY raw JSON. No markdown fences, no explanation.
+
+8. SHORT ANSWERS / TOPIC LISTS:
+   "Answer any N", "write short note on any N", "explain any N" -> split into child nodes "i","ii"... or "a","b"...
+   Parent text = instruction only. Each child = one topic with type="short".
+
+OUTPUT EXAMPLE (SI-003457 style bilingual paper with MCQ + descriptive + OR):
 {
   "Q1": {
-    "text": "Answer all of the following.",
-    "marks": null,
+    "text": "Answer the following objective questions-",
+    "marks": 5,
+    "type": "mcq",
     "subs": {
-      "A": {
-        "text": "Find the truth table for the logic gate circuit shown below.",
-        "marks": 5,
-        "subs": {}
+      "i": {
+        "text": "Small scale unit is measured in terms of:",
+        "marks": 1,
+        "type": "mcq",
+        "subs": {
+          "A": { "text": "Capital employed", "marks": null, "type": "mcq_option", "subs": {} },
+          "B": { "text": "No. of employees", "marks": null, "type": "mcq_option", "subs": {} },
+          "C": { "text": "Quantity of Production", "marks": null, "type": "mcq_option", "subs": {} },
+          "D": { "text": "Value of production", "marks": null, "type": "mcq_option", "subs": {} }
+        }
       },
-      "B": {
-        "text": "Solve the differential equation: $d^2y/dx^2 + 5dy/dx + 6y = 0$ given $y(0)=1$.",
-        "marks": 10,
-        "subs": {}
+      "ii": {
+        "text": "Promotion of business is undertaken for following purpose:",
+        "marks": 1,
+        "type": "mcq",
+        "subs": {
+          "A": { "text": "Starting a new business", "marks": null, "type": "mcq_option", "subs": {} },
+          "B": { "text": "Expansion of existing business", "marks": null, "type": "mcq_option", "subs": {} },
+          "C": { "text": "Facing Market Competition", "marks": null, "type": "mcq_option", "subs": {} },
+          "D": { "text": "All of the above", "marks": null, "type": "mcq_option", "subs": {} }
+        }
       }
     }
   },
-  "Q5": {
-    "text": "Write short note on any 2 from the following:",
+  "Q2": {
+    "text": "Answer the following questions briefly-",
     "marks": 10,
+    "type": "short",
     "subs": {
-      "a": { "text": "Reverse Engineering Process", "marks": 5, "subs": {} },
-      "b": { "text": "Unit Testing and Integration Testing", "marks": 5, "subs": {} },
-      "c": { "text": "Software Design Patterns", "marks": 5, "subs": {} }
+      "i": { "text": "Name various types of business environment.", "marks": 2, "type": "short", "subs": {} },
+      "ii": { "text": "What is the significance of industrial location?", "marks": 2, "type": "short", "subs": {} },
+      "iii": { "text": "What is the importance of Business Ethics?", "marks": 2, "type": "short", "subs": {} }
     }
+  },
+  "Q3": {
+    "text": "Explain Scientific Management. How does it help in growth of business?",
+    "marks": 5,
+    "type": "descriptive",
+    "subs": {}
+  },
+  "Q3_OR": {
+    "text": "Illustrate different forms of promotion of business.",
+    "marks": 5,
+    "type": "descriptive",
+    "subs": {}
+  },
+  "Q5": {
+    "text": "What are the different approaches of relationship between business and environment?",
+    "marks": 5,
+    "type": "descriptive",
+    "subs": {}
+  },
+  "Q5_OR": {
+    "text": "Describe the components and types of Environments which impacts the business.",
+    "marks": 5,
+    "type": "descriptive",
+    "subs": {}
   }
 }
 
@@ -266,9 +390,148 @@ TEXT TO PARSE:
 """
 
 
-def _build_tree_via_llm(text: str) -> Dict:
+ABVV_STRUCTURE_PROMPT = """You are an expert parser for ABVV (Atal Bihari Vajpayee Vishwavidyalaya) bilingual exam papers.
+
+This paper has already been cleaned: all Hindi/Devanagari text has been removed. Only English text remains.
+
+NUMBERING CONVENTION OF ABVV PAPERS:
+- Top-level questions: "1." "2." "3." ... (plain digits with a dot) → map to Q1, Q2, Q3...
+- Sub-questions: "(i)" "(ii)" "(iii)" "(iv)" "(v)" → children of the parent question
+- MCQ options: "(a)" "(b)" "(c)" "(d)" → children of the sub-question, type=mcq_option
+- OR alternative: line containing only "OR" or "अथवा/OR" → next question uses key "Q<N>_OR"
+- Section-A, Section-B, Unit-I, Unit-II → organisational labels, NOT question nodes
+
+CRITICAL RULES:
+1. "1." = Q1. The text AFTER "1." on the same line (or the next non-empty line) is Q1's question text.
+2. "(i)" under Q1 = Q1's first sub-question → key "i". Its text is on the SAME or NEXT line after "(i)".
+3. "(a)" under Q1.i = MCQ option A → {"text":"...","marks":null,"type":"mcq_option","subs":{}}
+4. If a question has sub-questions labeled (i)(ii)(iii)..., it is a CONTAINER — recurse into it.
+5. If a sub-question has options (a)(b)(c)(d), set type="mcq" and put options in subs as A/B/C/D.
+6. MARKS: "1x5=5" means 5 sub-questions each worth 1 mark. "2x5=10" = 5 sub-questions worth 2 marks each.
+7. OR alternatives: key pattern is Q<N>_OR. Both Q<N> and Q<N>_OR are siblings at top level.
+8. Return ONLY raw JSON. No markdown fences, no explanation.
+
+NODE SCHEMA:
+{ "text": "<English only>", "marks": <int or null>, "type": "mcq"|"mcq_option"|"descriptive"|"short", "subs": {} }
+
+--- EXACT EXAMPLE ONLY (DO NOT COPY THIS INTO YOUR OUTPUT) ---
+The following is purely to demonstrate how the ABVV numbering scheme maps to the JSON structure.
+
+Example Input text:
+  1. Answer the following objective questions-  1x5=5
+  (i) Small scale unit is measured in terms of:
+  (a) Capital employed  (b) No. of employees  (c) Quantity of Production  (d) Value of production
+  (ii) Promotion of business is undertaken for following purpose:
+  (a) Starting a new business  (b) Expansion of existing business  (c) Facing Market Competition  (d) All of the above
+  (iii) Rationalisation deals with:
+  (a) Technological aspect of manufacturing  (b) Elimination of waste  (c) Lesser requirement of Capital  (d) All of the above
+  (iv) The main purpose of optimum localisation is:
+  (a) Balanced growth  (b) Production and Distribution at lowest cost  (c) Better logistics and transportation  (d) Environmental protection
+  (v) Corporate Social responsibility is a:
+  (a) Burden to business  (b) Matter of social interest  (c) Matter of interest for both business and society  (d) All of the above
+  2. Answer the following questions briefly-  2x5=10
+  (i) What do you understand by horizontal and vertical business combinations?
+  (ii) Name various types of business environment.
+  (iii) What is the significance of industrial location?
+  (iv) What is the importance of Business Ethics?
+  (v) Explain Scale of Operations.
+  Section-B
+  Attempt any one question from each unit.  5x4=20
+  Unit-I
+  3. Explain Scientific Management. How does it help in growth of business?
+  OR
+  Illustrate different forms of promotion of business.
+  Unit-II
+  4. What are the different approaches of relationship between business and environment?
+  OR
+  Describe the components and types of Environments which impacts the business.
+  Unit-III
+  5. Explain the concept and scope of social responsibility.
+  OR
+  What is Doctrine of Social Responsibility? Focus on the emerging concepts.
+  Unit-IV
+  6. Discuss the need and importance of Business Ethics.
+  OR
+  Differentiate between Business Ethics and Morality.
+
+Expected JSON output:
+{
+  "Q1": {
+    "text": "Answer the following objective questions-",
+    "marks": 5,
+    "type": "mcq",
+    "subs": {
+      "i": { "text": "Small scale unit is measured in terms of:", "marks": 1, "type": "mcq",
+        "subs": {
+          "A": { "text": "Capital employed", "marks": null, "type": "mcq_option", "subs": {} },
+          "B": { "text": "No. of employees", "marks": null, "type": "mcq_option", "subs": {} },
+          "C": { "text": "Quantity of Production", "marks": null, "type": "mcq_option", "subs": {} },
+          "D": { "text": "Value of production", "marks": null, "type": "mcq_option", "subs": {} }
+        }
+      },
+      "ii": { "text": "Promotion of business is undertaken for following purpose:", "marks": 1, "type": "mcq",
+        "subs": {
+          "A": { "text": "Starting a new business", "marks": null, "type": "mcq_option", "subs": {} },
+          "B": { "text": "Expansion of existing business", "marks": null, "type": "mcq_option", "subs": {} },
+          "C": { "text": "Facing Market Competition", "marks": null, "type": "mcq_option", "subs": {} },
+          "D": { "text": "All of the above", "marks": null, "type": "mcq_option", "subs": {} }
+        }
+      },
+      "iii": { "text": "Rationalisation deals with:", "marks": 1, "type": "mcq",
+        "subs": {
+          "A": { "text": "Technological aspect of manufacturing", "marks": null, "type": "mcq_option", "subs": {} },
+          "B": { "text": "Elimination of waste", "marks": null, "type": "mcq_option", "subs": {} },
+          "C": { "text": "Lesser requirement of Capital", "marks": null, "type": "mcq_option", "subs": {} },
+          "D": { "text": "All of the above", "marks": null, "type": "mcq_option", "subs": {} }
+        }
+      },
+      "iv": { "text": "The main purpose of optimum localisation is:", "marks": 1, "type": "mcq",
+        "subs": {
+          "A": { "text": "Balanced growth", "marks": null, "type": "mcq_option", "subs": {} },
+          "B": { "text": "Production and Distribution at lowest cost", "marks": null, "type": "mcq_option", "subs": {} },
+          "C": { "text": "Better logistics and transportation", "marks": null, "type": "mcq_option", "subs": {} },
+          "D": { "text": "Environmental protection", "marks": null, "type": "mcq_option", "subs": {} }
+        }
+      },
+      "v": { "text": "Corporate Social responsibility is a:", "marks": 1, "type": "mcq",
+        "subs": {
+          "A": { "text": "Burden to business", "marks": null, "type": "mcq_option", "subs": {} },
+          "B": { "text": "Matter of social interest", "marks": null, "type": "mcq_option", "subs": {} },
+          "C": { "text": "Matter of interest for both business and society", "marks": null, "type": "mcq_option", "subs": {} },
+          "D": { "text": "All of the above", "marks": null, "type": "mcq_option", "subs": {} }
+        }
+      }
+    }
+  },
+  "Q2": {
+    "text": "Answer the following questions briefly-",
+    "marks": 10,
+    "type": "short",
+    "subs": {
+      "i": { "text": "What do you understand by horizontal and vertical business combinations?", "marks": 2, "type": "short", "subs": {} },
+      "ii": { "text": "Name various types of business environment.", "marks": 2, "type": "short", "subs": {} },
+      "iii": { "text": "What is the significance of industrial location?", "marks": 2, "type": "short", "subs": {} },
+      "iv": { "text": "What is the importance of Business Ethics?", "marks": 2, "type": "short", "subs": {} },
+      "v": { "text": "Explain Scale of Operations.", "marks": 2, "type": "short", "subs": {} }
+    }
+  },
+  "Q3": { "text": "Explain Scientific Management. How does it help in growth of business?", "marks": 5, "type": "descriptive", "subs": {} },
+  "Q3_OR": { "text": "Illustrate different forms of promotion of business.", "marks": 5, "type": "descriptive", "subs": {} },
+  "Q4": { "text": "What are the different approaches of relationship between business and environment?", "marks": 5, "type": "descriptive", "subs": {} },
+  "Q4_OR": { "text": "Describe the components and types of Environments which impacts the business.", "marks": 5, "type": "descriptive", "subs": {} },
+  "Q5": { "text": "Explain the concept and scope of social responsibility.", "marks": 5, "type": "descriptive", "subs": {} },
+  "Q5_OR": { "text": "What is Doctrine of Social Responsibility? Focus on the emerging concepts.", "marks": 5, "type": "descriptive", "subs": {} },
+  "Q6": { "text": "Discuss the need and importance of Business Ethics.", "marks": 5, "type": "descriptive", "subs": {} },
+  "Q6_OR": { "text": "Differentiate between Business Ethics and Morality.", "marks": 5, "type": "descriptive", "subs": {} }
+}
+
+NOW PARSE THE ACTUAL TEXT BELOW. DO NOT OUTPUT ANY QUESTIONS FROM THE EXAMPLE ABOVE. ONLY OUTPUT THE QUESTIONS FOUND IN THIS TEXT:
+"""
+
+def _build_tree_via_llm(text: str, university: str = "generic") -> Dict:
     """Use Groq key pool to produce a fully nested JSON question tree."""
-    prompt = STRUCTURE_PROMPT + text[:7000]
+    base_prompt = ABVV_STRUCTURE_PROMPT if university == "abvv" else STRUCTURE_PROMPT
+    prompt = base_prompt + text[:7000]
 
     for attempt in range(6):  # try each key once
         llm, api_key = groq_pool.get_llm()
@@ -303,14 +566,40 @@ def _flatten_tree(tree: Dict, path: List = None, rows: List = None) -> List:
     if rows is None:
         rows = []
     for key, node in tree.items():
+        node_type = node.get("type") or "descriptive"
+        # Skip MCQ option nodes — their text is included in parent MCQ row
+        if node_type == "mcq_option":
+            continue
+
         new_path = path + [key]
         # Pad / truncate to 4 hierarchy columns: Q, Sub, Sub-Sub, Sub-Sub-Sub
         h = (new_path + [""] * 4)[:4]
         marks_val = str(node.get("marks", "") or "")
-        rows.append(h + [node.get("text", ""), marks_val, ""])
-        if node.get("subs"):
-            _flatten_tree(node["subs"], new_path, rows)
+
+        # For LEAF MCQ nodes: embed options inline in the text
+        text_val  = node.get("text", "")
+        subs_map  = node.get("subs") or {}
+        is_leaf_mcq = node_type == "mcq" and any(
+            sv.get("type") == "mcq_option" for sv in subs_map.values()
+        )
+
+        if is_leaf_mcq:
+            option_lines = [
+                f"  ({ok}) {ov.get('text', '')}"
+                for ok, ov in subs_map.items()
+                if ov.get("type") == "mcq_option"
+            ]
+            if option_lines:
+                text_val = text_val + "\n" + "\n".join(option_lines)
+
+        rows.append(h + [text_val, marks_val, node_type.upper(), ""])
+
+        # Recurse for container MCQs and all non-MCQ nodes;
+        # skip only for leaf MCQs (options already embedded above)
+        if subs_map and not is_leaf_mcq:
+            _flatten_tree(subs_map, new_path, rows)
     return rows
+
 
 
 # --------------------------------------------------------------------------
@@ -328,7 +617,37 @@ def _preprocess_for_ocr(path: str) -> np.ndarray:
     return thresh
 
 
+# Devanagari and extended Hindi Unicode ranges
+_HINDI_RE = re.compile(
+    r'[\u0900-\u097F'     # Devanagari
+    r'\u0966-\u096F'      # Devanagari digits
+    r'\uA8E0-\uA8FF'     # Devanagari Extended
+    r'\u1CD0-\u1CFF'     # Vedic Extensions
+    r']+'
+)
+
+
+def _strip_hindi(text: str) -> str:
+    """Remove all Devanagari / Hindi Unicode characters from text."""
+    return _HINDI_RE.sub(' ', text)
+
+
+def _reconstruct_bilingual_lines(text: str) -> str:
+    """
+    Merge isolated labels like '(i)' or '(a)' with the text on the next line.
+    This happens because stripping Hindi leaves the English translation on a new line.
+    """
+    # Merge (a), (b), (c), (d) or (i), (ii) with the following line
+    text = re.sub(r'(?m)^(\s*\([a-zivx]+\))\s*\n\s*', r'\1 ', text)
+    # Merge 1., 2. with following line if it's just the number
+    text = re.sub(r'(?m)^(\s*\d+\.)\s*\n\s*', r'\1 ', text)
+    return text
+
+
 def _clean_text(text: str) -> str:
+    # ── Step 0: Strip ALL Devanagari/Hindi Unicode first ──────────────────
+    text = _strip_hindi(text)
+
     cleaned = []
     for line in text.split("\n"):
         line = line.strip()
@@ -336,8 +655,12 @@ def _clean_text(text: str) -> str:
             continue
         if "-----" in line or "=====" in line:
             continue
-        noise = len(re.findall(r"[^a-zA-Z0-9\s\.\)\(:/-]", line))
-        if noise > len(line) * 0.45:
+        # After Hindi strip, lines that are mostly non-alphanumeric are garbage
+        noise = len(re.findall(r"[^a-zA-Z0-9\s\.\)\(:\-/,;%@]", line))
+        if len(line) > 0 and noise > len(line) * 0.40:
+            continue
+        # Drop lines that are entirely whitespace/punctuation after stripping
+        if not re.search(r'[a-zA-Z0-9]', line):
             continue
         cleaned.append(line)
     return "\n".join(cleaned)
@@ -356,9 +679,25 @@ def pdf_ingestion_node(state: QPState) -> QPState:
         for i, page in enumerate(doc):
             # 200 DPI for sharper OCR results
             pix = page.get_pixmap(dpi=200)
-            path = os.path.join(OUTPUT_DIR, f"{task_id}_page_{i+1}.png")
-            pix.save(path)
-            image_paths.append(path)
+            
+            # If the image is landscape (e.g. a 2-page booklet spread), split it in half
+            if pix.width > pix.height * 1.1:
+                from PIL import Image
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                w, h = img.size
+                left_half = img.crop((0, 0, w//2, h))
+                right_half = img.crop((w//2, 0, w, h))
+                
+                path_l = os.path.join(OUTPUT_DIR, f"{task_id}_page_{i+1}_L.png")
+                path_r = os.path.join(OUTPUT_DIR, f"{task_id}_page_{i+1}_R.png")
+                left_half.save(path_l)
+                right_half.save(path_r)
+                image_paths.extend([path_l, path_r])
+            else:
+                path = os.path.join(OUTPUT_DIR, f"{task_id}_page_{i+1}.png")
+                pix.save(path)
+                image_paths.append(path)
+                
         msg = f"PDF Ingestion complete: {len(image_paths)} page(s) rendered."
         update_task_progress(task_id, "pdf_ingestion", 20, msg)
         return {**state, "image_paths": image_paths,
@@ -392,22 +731,37 @@ def ocr_node(state: QPState) -> QPState:
 
 def cleaning_node(state: QPState) -> QPState:
     task_id = state.get("task_id", "default")
+    university = state.get("university", "generic")
     update_task_progress(task_id, "cleaning", 45, "Cleaning OCR noise and artifacts...")
     cleaned = _clean_text(state.get("raw_text", ""))
 
     if len(cleaned) > 100:
         update_task_progress(task_id, "cleaning", 50, "Groq LLM secondary cleaning pass...")
+        is_bilingual = university in ("abvv",)
+        bilingual_note = (
+            "CRITICAL PRIORITY: This is a BILINGUAL exam paper (Hindi + English).\n"
+            "The OCR has scanned BOTH languages, but it lacked Hindi fonts, so Hindi words appear as garbled meaningless ASCII letters (e.g. 'aifeier', 'attat', 'Geren at Seen'). You MUST:\n"
+            "  - REMOVE every Hindi word, sentence, or fragment entirely, including all this meaningless garbled ASCII noise.\n"
+            "  - Keep ONLY the valid English text for each question.\n"
+            "  - IMPORTANT: In bilingual papers, the question number (e.g., '(i)', '1.') is often only written ONCE before the Hindi text. If you delete a garbled Hindi question, YOU MUST PRESERVE its question number and attach it to the English translation!\n"
+            "  - IMPORTANT: If a question has duplicate multiple-choice options (one set for Hindi, one set for English like '(a) 9 (b) 18...' appearing twice), KEEP ONLY ONE SET of options.\n"
+        ) if is_bilingual else (
+            "If any text is written in Hindi (Devanagari script) or garbled ASCII noise, COMPLETELY REMOVE it. Only retain valid English text.\n"
+        )
         prompt = (
-            "You are an OCR text cleaning assistant for university exam papers in technical disciplines (Engineering, Math, Physics).\n"
-            "1. Fix broken words, merge lines split due to layout columns, and remove page footers, watermarks, or garbage characters.\n"
-            "2. Standardize mathematical equations: clean and repair scientific/technical symbols (theta, delta, summation, integrations, pi, exponents, subscripts, vectors) and matrices.\n"
-            "3. Preserve all structural elements including tables, truth tables, list headers, and notes.\n"
-            "4. CRITICAL: Preserve ALL question numbers (Q1, Q2...), sub-question labels (A, B, C, a, b, 1, 2, i, ii...), marks notation, and the header block exactly as found.\n"
-            "Return ONLY the cleaned text. No preamble or explanations.\n\n"
+            "You are an OCR text cleaning assistant for university exam papers.\n"
+            + bilingual_note +
+            "Additional rules:\n"
+            "1. Fix broken words and merge lines split due to two-column layout.\n"
+            "2. Remove page footers, watermarks, header repetitions (like 'SI-003457', 'Turn Over', 'Continued'). Note that the main top header has already been extracted, you can strip it.\n"
+            "3. Preserve question numbers (1., 2., 3... or Q1, Q2...), sub-question labels (i, ii, iii or a, b, c), MCQ option labels ((a)(b)(c)(d) or (A)(B)(C)(D)), and marks notation.\n"
+            "4. Preserve Section-A / Section-B / Unit-I / Unit-II headings.\n"
+            "5. Do NOT reorder or rephrase questions. Output the cleaned text in the exact same order.\n"
+            "Return ONLY the cleaned English text. No preamble or explanations.\n\n"
             f"TEXT:\n{cleaned[:7000]}"
         )
         for attempt in range(6):
-            llm, api_key = groq_pool.get_llm()
+            llm, api_key = groq_pool.get_llm(model_name="meta-llama/llama-4-scout-17b-16e-instruct")
             try:
                 resp    = llm.invoke([HumanMessage(content=prompt)])
                 cleaned = resp.content.strip()
@@ -433,45 +787,78 @@ def header_extraction_node(state: QPState) -> QPState:
     task_id    = state.get("task_id", "default")
     university = state.get("university", "generic")
     update_task_progress(task_id, "header_extraction", 65,
-                         f"Extracting header ({university.title()} University mode)...")
+                         f"Extracting header ({university.upper()} mode)...")
 
-    text   = state.get("clean_text", "")
-    header = _extract_header(text, university)
+    # Extract header from the raw OCR text (before LLM cleaning) because
+    # the LLM often aggressively deletes the header block thinking it's a watermark.
+    raw_text = state.get("raw_text", state.get("clean_text", ""))
+    header = _extract_header(raw_text, university)
 
-    # Separate body text — everything after the first Q1/Q.1
-    split = re.split(r"(?:^|\n)\s*(Q\.?\s*1\b)", text, maxsplit=1, flags=re.I | re.M)
+    # Separate body text using the LLM-cleaned text so we don't parse garbage
+    clean_text = state.get("clean_text", "")
+
+    # Handle both: 'Q1' / 'Q.1' style (Mumbai) and '1.' plain number style (ABVV)
+    # Try Q-style first, then plain number style.
+    body = None
+    split = re.split(r"(?:^|\n)\s*(Q\.?\s*1\b)", clean_text, maxsplit=1, flags=re.I | re.M)
     if len(split) > 1:
         body = (split[1] + split[2]).strip() if len(split) > 2 else split[1].strip()
     else:
-        body = text
+        # ABVV / plain numbered: split on first standalone '1.' or '1 .'
+        split2 = re.split(r"(?:^|\n)(\s*1\s*\.(?:\s|$))", clean_text, maxsplit=1, flags=re.M)
+        if len(split2) > 1:
+            body = (split2[1] + split2[2]).strip() if len(split2) > 2 else split2[1].strip()
+        else:
+            body = clean_text  # fallback: use entire clean text as body
 
     update_task_progress(task_id, "header_extraction", 70,
-                         f"Header extracted. Subject: {header.get('subject') or 'Generic Subject'}")
+                         f"Header extracted. Subject: {header.get('subject') or 'Unknown'}")
     return {**state, "header": header, "body_text": body,
             "messages": state["messages"] + [AIMessage(content=f"Header: {header}")]}
 
 
 def normalization_node(state: QPState) -> QPState:
-    task_id = state.get("task_id", "default")
+    task_id    = state.get("task_id", "default")
+    university = state.get("university", "generic")
     update_task_progress(task_id, "normalization", 72,
                          "Normalizing structural boundaries for hierarchical parsing...")
-    # Light normalization — just ensure Q markers have a preceding newline
     text = state.get("body_text", "")
+
+    # Final Hindi strip pass in case LLM cleaning left residue
+    text = _strip_hindi(text)
+
+    # For bilingual (ABVV) papers: reconstruct split lines so the LLM sees
+    # '(i) Small scale unit...' not '(i)\nSmall scale unit...' on separate lines
+    if university == "abvv":
+        text = _reconstruct_bilingual_lines(text)
+
+    # Ensure Q-style markers have a preceding newline
     text = re.sub(r"(?<!\n)(Q\.?\s*\d+)", r"\n\1", text, flags=re.I)
+    # Ensure plain number markers '1.' '2.' etc start on their own line
+    text = re.sub(r"(?<!\n)(^\s*\d+\.\s)", r"\n\1", text, flags=re.I | re.M)
+    # Remove page artefacts like 'Turn Over', 'Continued', 'SI-003457' repeats
+    text = re.sub(r'\(Turn\s*Over\)', '', text, flags=re.I)
+    text = re.sub(r'\(Continued\)', '', text, flags=re.I)
+    text = re.sub(r'\bSI[-\s]?\d{4,8}\b', '', text, flags=re.I)
+    # Remove standalone page numbers like (2), (3), (4) on their own line
+    text = re.sub(r'^\(\d+\)\s*$', '', text, flags=re.M)
+    # Collapse 3+ blank lines into 1
+    text = re.sub(r'\n{3,}', '\n\n', text)
+
     update_task_progress(task_id, "normalization", 78, "Normalization complete.")
     return {**state, "normalized": text,
             "messages": state["messages"] + [AIMessage(content="Normalization done.")]}
 
 
 def structure_node(state: QPState) -> QPState:
-    task_id = state.get("task_id", "default")
+    task_id    = state.get("task_id", "default")
+    university = state.get("university", "generic")
     update_task_progress(task_id, "structure", 80,
                          "Invoking Groq Llama-3.3-70b for deep hierarchical JSON tree construction...")
 
     normalized = state.get("normalized", "")
 
-    # Always use Groq for the deep parse
-    tree = _build_tree_via_llm(normalized)
+    tree = _build_tree_via_llm(normalized, university)
     q_count = len(tree)
     update_task_progress(task_id, "structure", 88,
                          f"JSON tree built: {q_count} main question(s) extracted.")
@@ -609,8 +996,17 @@ def excel_writer_node(state: QPState) -> QPState:
             ("Scheme",    "scheme"),
             ("Note",      "note"),
         ]
+    elif university == "abvv":
+        metadata_fields += [
+            ("Semester",      "semester"),
+            ("Exam Session",  "exam_session"),
+            ("Exam Type",     "exam"),
+            ("Paper Type",    "paper_type"),
+            ("Note",          "note"),
+        ]
     else:
         metadata_fields += [("Exam", "exam")]
+
 
     for label, key in metadata_fields:
         ws.append([label, header.get(key, "")])
@@ -618,11 +1014,11 @@ def excel_writer_node(state: QPState) -> QPState:
     ws.append([])
 
     # ── Column headers ─────────────────────────────────────────
-    ws.append(["Q", "Sub", "Sub-Sub", "Sub-Sub-Sub", "Question Text", "Marks", "Visual"])
+    ws.append(["Q", "Sub", "Sub-Sub", "Sub-Sub-Sub", "Question Text", "Marks", "Type", "Visual"])
     start_row = ws.max_row + 1
 
     for row in rows:
-        while len(row) < 7:
+        while len(row) < 8:
             row.append("")
         ws.append(row)
 
@@ -630,13 +1026,14 @@ def excel_writer_node(state: QPState) -> QPState:
     for i, path in enumerate(diagrams):
         if os.path.exists(path):
             try:
-                ws.add_image(ExcelImage(path), f"G{start_row + i}")
+                ws.add_image(ExcelImage(path), f"H{start_row + i}")
             except Exception as e:
                 print(f"  Image embed error: {e}")
 
     # ── Column widths ──────────────────────────────────────────
-    for col, width in [("A",8),("B",8),("C",8),("D",8),("E",90),("F",8),("G",30)]:
+    for col, width in [("A",8),("B",8),("C",8),("D",8),("E",90),("F",8),("G",12),("H",30)]:
         ws.column_dimensions[col].width = width
+
 
     out_path = os.path.join(OUTPUT_DIR, f"{task_id}_output.xlsx")
     wb.save(out_path)
@@ -807,31 +1204,27 @@ class GroqKeysPool:
                 print(f"[GroqKeysPool] Key {key[:12]}... error. Cooling 30s.")
             self.cooldowns[key] = time.time() + cooldown
 
-    def get_llm(self):
+    def get_llm(self, model_name="llama-3.3-70b-versatile"):
         with self._lock:
             now = time.time()
             for _ in range(len(self.keys)):
                 key = self.keys[self._index]
                 self._index = (self._index + 1) % len(self.keys)
                 if now >= self.cooldowns[key]:
-                    return ChatGroq(model="llama-3.3-70b-versatile",
+                    return ChatGroq(model=model_name,
                                     temperature=0.1, api_key=key), key
             # All keys on cooldown — use least-expired one
             best_key = min(self.keys, key=lambda k: self.cooldowns[k])
-            return ChatGroq(model="llama-3.3-70b-versatile",
+            return ChatGroq(model=model_name,
                             temperature=0.1, api_key=best_key), best_key
-
-    def mark_cooldown(self, key: str, seconds: float = 30.0):
-        """Legacy compat — prefer handle_error() for new code."""
-        with self._lock:
-            if key in self.cooldowns:
-                self.cooldowns[key] = time.time() + seconds
-                print(f"[GroqKeysPool] Key {key[:12]}... throttled. Cool down: {seconds}s.")
 
 groq_pool = GroqKeysPool()
 
 
-def classify_question(text: str) -> str:
+def classify_question(text: str, q_type: str = "descriptive") -> str:
+    """Classify question for answer generation. Respects pre-tagged MCQ type from LLM parser."""
+    if q_type == "mcq":
+        return "MCQ"
     t = text.lower()
     if any(w in t for w in ["differentiate", "compare", "distinguish", "difference"]):
         return "Differences"
@@ -845,19 +1238,49 @@ def classify_question(text: str) -> str:
 
 
 ANSWERS_PROMPTS = {
-    "Differences": (
-        "Write a super-technical, university-style comparative answer for:\n"
-        "Question: '{question}'\n"
-        "Total Marks: {marks}\n\n"
+    "MCQ": (
+        "You are an expert university examiner. A multiple-choice question is given below with its options.\n"
+        "Question Stem: '{question}'\n"
+        "Options:\n{options}\n\n"
         "STRICT OUTPUT FORMAT (PLAIN TEXT ONLY -- NO ** OR * SYMBOLS ANYWHERE):\n"
-        "1. Write a 2-sentence high-level comparison paragraph.\n"
-        "2. Write a comparison table with columns: | Parameter | {concept1} | {concept2} |\n"
-        "   - Include exactly {num_points} distinct technical rows.\n"
-        "   - Keep each cell concise (max 8 words). Every row must be on its own line.\n"
-        "3. After the table, write one formal paragraph for each concept: definition, working principle, use case.\n"
-        "4. Use === SECTION HEADING === for each section heading on its own line.\n"
-        "5. PLAIN TEXT ONLY. No asterisks, no bold markers, no LaTeX $ symbols.\n"
-        "6. Tone: strictly academic, formal, super-technical, zero emojis."
+        "1. === CORRECT ANSWER ===\n"
+        "   State: The correct answer is option [LETTER]: [Option Text]\n"
+        "2. === EXPLANATION ===\n"
+        "   Provide a clear, technically precise explanation in {num_points} sentences justifying WHY this option is correct.\n"
+        "3. === WHY OTHER OPTIONS ARE WRONG ===\n"
+        "   For each incorrect option, write one sentence explaining why it is wrong.\n"
+        "4. PLAIN TEXT ONLY. No asterisks, no bold markers.\n"
+        "5. Tone: strictly academic, formal, zero emojis."
+    ),
+    "Differences": (
+        "You are a university professor writing a model answer for a comparison/differentiation question.\n"
+        "Question: '{question}'\n"
+        "The two things being compared are: TERM_1 = '{concept1}'  and  TERM_2 = '{concept2}'\n"
+        "Total Marks: {marks}\n\n"
+        "YOUR TASK: Write a complete, detailed university-level comparative answer. Follow this EXACT structure:\n"
+        "\n"
+        "=== OVERVIEW ===\n"
+        "Write 2-3 sentences introducing both '{concept1}' and '{concept2}' and why comparing them is meaningful.\n"
+        "\n"
+        "=== COMPARISON TABLE ===\n"
+        "Create a markdown table with EXACTLY 3 columns: Parameter | {concept1} | {concept2}\n"
+        "- Include EXACTLY {num_points} rows (one per distinct comparison parameter).\n"
+        "- BOTH the '{concept1}' column AND the '{concept2}' column MUST have a value in EVERY single row. Do NOT leave any cell blank or empty.\n"
+        "- Each cell: max 10 words, precise, technical.\n"
+        "- Parameters to cover (use these or similar technical ones): Definition, Scope, Application, Enforcement/Source, Focus/Goal, Nature, Example.\n"
+        "- Format: | Parameter | value for {concept1} | value for {concept2} |\n"
+        "- Start the table with the header row: | Parameter | {concept1} | {concept2} |\n"
+        "\n"
+        "=== {concept1}: DETAILED EXPLANATION ===\n"
+        "Write 3-4 sentences: definition, principle, real-world use case.\n"
+        "\n"
+        "=== {concept2}: DETAILED EXPLANATION ===\n"
+        "Write 3-4 sentences: definition, principle, real-world use case.\n"
+        "\n"
+        "RULES:\n"
+        "- PLAIN TEXT ONLY. No ** or * markdown bold/italic.\n"
+        "- The comparison table MUST have values in EVERY cell — never leave a column empty.\n"
+        "- Tone: strictly academic, formal, technically precise, zero emojis."
     ),
     "Define": (
         "Write a highly descriptive, super-technical university-style answer for:\n"
@@ -942,28 +1365,90 @@ def _marks_to_points(marks) -> int:
     return 14
 
 
+def _extract_comparison_concepts(text: str):
+    """
+    Robustly extract the two terms being compared from a differentiation question.
+    Handles patterns: 'between X and Y', 'X and Y', 'X vs Y', 'X versus Y',
+    'differentiate X and Y', 'compare X with Y', etc.
+    Returns (concept1, concept2).
+    """
+    t = text.strip()
+
+    # Pattern 1: 'between X and Y' (most reliable)
+    m = re.search(
+        r'between\s+([A-Za-z][A-Za-z\s\-\']+?)\s+and\s+([A-Za-z][A-Za-z\s\-\']+?)'
+        r'(?:\s*[.?!,]|$)',
+        t, re.I
+    )
+    if m:
+        return m.group(1).strip().title(), m.group(2).strip().title()
+
+    # Pattern 2: 'X and Y' after a verb keyword
+    m = re.search(
+        r'(?:differentiate|compare|distinguish|contrast|difference\s+between)\s+'
+        r'([A-Za-z][A-Za-z\s\-\']+?)\s+(?:and|vs\.?|versus|with)\s+'
+        r'([A-Za-z][A-Za-z\s\-\']+?)(?:\s*[.?!,]|$)',
+        t, re.I
+    )
+    if m:
+        return m.group(1).strip().title(), m.group(2).strip().title()
+
+    # Pattern 3: 'X vs Y' anywhere
+    m = re.search(
+        r'([A-Za-z][A-Za-z\s\-\']+?)\s+(?:vs\.?|versus)\s+'
+        r'([A-Za-z][A-Za-z\s\-\']+?)(?:\s*[.?!,]|$)',
+        t, re.I
+    )
+    if m:
+        return m.group(1).strip().title(), m.group(2).strip().title()
+
+    # Fallback: extract two longest noun phrases after the first keyword
+    after_kw = re.split(r'\b(?:differentiate|compare|distinguish|explain|describe)\b', t, maxsplit=1, flags=re.I)
+    search_text = after_kw[1] if len(after_kw) > 1 else t
+    # Find anything separated by 'and'
+    m = re.search(r'([A-Za-z][A-Za-z\s\-\']{2,30?})\s+and\s+([A-Za-z][A-Za-z\s\-\']{2,30?})', search_text, re.I)
+    if m:
+        return m.group(1).strip().title(), m.group(2).strip().title()
+
+    # Last resort: just label them generically using key nouns
+    nouns = re.findall(r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*', t)
+    c1 = nouns[0] if len(nouns) > 0 else "Concept A"
+    c2 = nouns[1] if len(nouns) > 1 else "Concept B"
+    return c1, c2
+
+
 def solve_single_question(item: Dict[str, Any]) -> Dict[str, Any]:
     key      = item["key"]
     text     = item["text"]
     marks    = item.get("marks", 0)
-    category = classify_question(text)
+    q_type   = item.get("q_type", "descriptive")
+    options  = item.get("options", [])  # list of dicts {letter, text} for MCQ
+    category = classify_question(text, q_type)
     num_pts  = _marks_to_points(marks)
 
-    # Detect the two concepts for Differences prompts
-    concepts = re.findall(r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)", text)
-    concept1 = concepts[0] if len(concepts) > 0 else "Concept A"
-    concept2 = concepts[1] if len(concepts) > 1 else "Concept B"
+    # Robustly extract the two concepts for Differences prompts
+    concept1, concept2 = _extract_comparison_concepts(text)
 
-    prompt = ANSWERS_PROMPTS[category].format(
-        question   = text,
-        marks      = marks or "Not specified",
-        num_points = num_pts,
-        concept1   = concept1,
-        concept2   = concept2,
-    )
+    if category == "MCQ":
+        options_str = "\n".join(
+            f"  ({o['letter']}) {o['text']}" for o in options
+        ) if options else "Options not available"
+        prompt = ANSWERS_PROMPTS["MCQ"].format(
+            question   = text,
+            options    = options_str,
+            num_points = max(num_pts, 3),
+        )
+    else:
+        prompt = ANSWERS_PROMPTS[category].format(
+            question   = text,
+            marks      = marks or "Not specified",
+            num_points = num_pts,
+            concept1   = concept1,
+            concept2   = concept2,
+        )
 
     for attempt in range(5):
-        llm, api_key = groq_pool.get_llm()
+        llm, api_key = groq_pool.get_llm(model_name="meta-llama/llama-4-scout-17b-16e-instruct")
         try:
             resp = llm.invoke([HumanMessage(content=prompt)])
             return {
@@ -971,6 +1456,8 @@ def solve_single_question(item: Dict[str, Any]) -> Dict[str, Any]:
                 "text":     text,
                 "marks":    marks,
                 "category": category,
+                "q_type":   q_type,
+                "options":  options,
                 "answer":   resp.content.strip()
             }
         except Exception as e:
@@ -986,24 +1473,83 @@ def solve_single_question(item: Dict[str, Any]) -> Dict[str, Any]:
         "text":     text,
         "marks":    marks,
         "category": category,
+        "q_type":   q_type,
+        "options":  options,
         "answer":   "Model Answer could not be generated due to service limits."
     }
 
 
+def _answer_sort_key(key: str) -> list:
+    """
+    Natural hierarchical sort key for answer keys like:
+    Q1, Q1.i, Q1.ii, Q2, Q3, Q3_OR, Q10, Q10.i
+    Sorts: Q1 < Q1.i < Q1.ii < Q2 < Q3 < Q3_OR < Q10 < Q10.i
+    """
+    roman_map = {"i":1,"ii":2,"iii":3,"iv":4,"v":5,
+                 "vi":6,"vii":7,"viii":8,"ix":9,"x":10}
+    parts = key.split(".")
+    result = []
+    for part in parts:
+        is_or = 0
+        core  = part
+        if "_OR" in part.upper():
+            is_or = 1
+            core  = re.sub(r'_OR', '', part, flags=re.I)
+        m = re.match(r'[Qq](\d+)', core)
+        if m:
+            result.extend([int(m.group(1)), is_or])
+        else:
+            low = core.lower()
+            if low in roman_map:
+                result.extend([roman_map[low], is_or])
+            elif len(low) == 1 and low.isalpha():
+                result.extend([ord(low) - ord('a') + 1, is_or])
+            else:
+                result.extend([0, is_or])
+    return result
+
+
 def generate_answers_for_tree(structured_tree: Dict, task_id: str) -> List[Dict[str, Any]]:
+
     flat_questions = []
 
-    def traverse(node_map: Dict, path: str = ""):
+    def traverse(node_map: Dict, path: str = "", parent_type: str = "descriptive"):
         for k, v in node_map.items():
             current_key = f"{path}.{k}" if path else k
+            node_type = v.get("type", parent_type)
+
+            # Skip MCQ option child nodes — their parent MCQ node handles them
+            if node_type == "mcq_option":
+                continue
+
             if v.get("text"):
-                flat_questions.append({
-                    "key":   current_key,
-                    "text":  v["text"],
-                    "marks": v.get("marks", 0)
-                })
-            if v.get("subs"):
-                traverse(v["subs"], current_key)
+                item = {
+                    "key":    current_key,
+                    "text":   v["text"],
+                    "marks":  v.get("marks", 0),
+                    "q_type": node_type,
+                }
+                # If this is a LEAF MCQ (has direct mcq_option children), collect its options
+                subs = v.get("subs") or {}
+                has_direct_options = any(
+                    sv.get("type") == "mcq_option" for sv in subs.values()
+                )
+                if node_type == "mcq" and has_direct_options:
+                    item["options"] = [
+                        {"letter": opt_key, "text": opt_val.get("text", "")}
+                        for opt_key, opt_val in subs.items()
+                        if opt_val.get("type") == "mcq_option"
+                    ]
+                flat_questions.append(item)
+
+            # Recurse into subs:
+            # - Always recurse for non-MCQ nodes
+            # - Recurse for CONTAINER MCQs (sub-questions like i, ii, iii)
+            # - SKIP only for LEAF MCQs (direct A/B/C/D options already captured)
+            subs_map = v.get("subs") or {}
+            is_leaf_mcq = any(sv.get("type") == "mcq_option" for sv in subs_map.values())
+            if subs_map and not is_leaf_mcq:
+                traverse(subs_map, current_key, node_type)
 
     traverse(structured_tree)
 
@@ -1022,8 +1568,10 @@ def generate_answers_for_tree(structured_tree: Dict, task_id: str) -> List[Dict[
             update_task_progress(task_id, "answering", percentage,
                                  f"Solved {index+1} of {len(flat_questions)}: Question {res['key']}")
 
-    results.sort(key=lambda x: x["key"])
+    results.sort(key=lambda x: _answer_sort_key(x["key"]))
     return results
+
+
 
 
 # ── FPDF2 PDF Compiler ──
@@ -1316,15 +1864,21 @@ def compile_answers_pdf(results: List[Dict[str, Any]], header: Dict[str, str], t
 
     # ── Question Answer Blocks ──────────────────────────────────────
     for item in results:
-        key  = item["key"]
-        text = item["text"]
-        cat  = item["category"]
-        ans  = item["answer"]
+        key    = item["key"]
+        text   = item["text"]
+        cat    = item["category"]
+        ans    = item["answer"]
+        q_type = item.get("q_type", "descriptive")
+        options = item.get("options", [])
 
-        # Question heading bar
+        # Question heading bar — amber for MCQ, default for others
         pdf.set_font("times", "B", 11)
-        pdf.set_fill_color(241, 245, 249)
-        pdf.set_text_color(15, 23, 42)
+        if cat == "MCQ":
+            pdf.set_fill_color(254, 243, 199)   # amber-50
+            pdf.set_text_color(120, 60, 0)
+        else:
+            pdf.set_fill_color(241, 245, 249)
+            pdf.set_text_color(15, 23, 42)
         heading = sanitize_for_pdf(f"Question {key}  [{cat.upper()}]")
         pdf.set_x(pdf.l_margin)
         pdf.cell(0, 8, heading, border="TB", align="L", fill=True)
@@ -1336,15 +1890,34 @@ def compile_answers_pdf(results: List[Dict[str, Any]], header: Dict[str, str], t
         pdf.multi_cell(0, 5, sanitize_for_pdf(f'"{text}"'))
         pdf.ln(3)
 
+        # For MCQ: list the options before the answer
+        if cat == "MCQ" and options:
+            pdf.set_font("times", "B", 9)
+            pdf.set_text_color(120, 70, 10)
+            pdf.cell(0, 6, "OPTIONS:")
+            pdf.ln(6)
+            for opt in options:
+                pdf.set_font("times", "", 9)
+                pdf.set_text_color(30, 41, 59)
+                pdf.set_x(pdf.l_margin + 6)
+                pdf.cell(0, 5, sanitize_for_pdf(f"  ({opt['letter']})  {opt['text']}"))
+                pdf.ln(5)
+            pdf.ln(2)
+
         # Model Answer label
         pdf.set_font("times", "B", 10)
-        pdf.set_text_color(79, 70, 229)
-        pdf.cell(0, 6, "MODEL SOLUTION:")
+        if cat == "MCQ":
+            pdf.set_text_color(120, 70, 10)
+            pdf.cell(0, 6, "ANSWER ANALYSIS:")
+        else:
+            pdf.set_text_color(79, 70, 229)
+            pdf.cell(0, 6, "MODEL SOLUTION:")
         pdf.ln(7)
 
         # Answer content (markdown-aware)
         write_markdown_to_pdf(pdf, ans)
         pdf.ln(8)
+
 
     out_path = os.path.join(OUTPUT_DIR, f"{task_id}_answers.pdf")
     pdf.output(out_path)

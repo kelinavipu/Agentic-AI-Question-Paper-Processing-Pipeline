@@ -1,152 +1,39 @@
-# Extracta — AI Question Paper Processing Pipeline
+# Extracta Pipeline v2.2
 
-> An agentic AI system that ingests university exam PDFs, extracts and structures all questions via OCR + LLM, generates academic model answer sheets, and exports everything as Excel + PDF.
+Extracta is an AI-powered pipeline designed to convert complex, bilingual, and hierarchical university question papers (PDFs) into structured Excel worksheets with generated answers.
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-green?style=flat-square&logo=fastapi)
-![Groq](https://img.shields.io/badge/Groq-Llama--3.3--70b-orange?style=flat-square)
-![LangGraph](https://img.shields.io/badge/LangGraph-Agentic-purple?style=flat-square)
-![License](https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square)
+## Groq Model Load-Balancing Hierarchy
 
----
+To process 10-12 papers in bulk without hitting Groq API daily rate limits, the pipeline implements a hybrid load-balancing architecture. It routes token-heavy text processing to high-limit models and reserves the smartest model strictly for complex JSON structuring.
 
-## Features
+*   **LLM Cleaning pass:** `meta-llama/llama-4-scout-17b-16e-instruct`
+    *   *Why:* This node runs for every single page in a paper. By offloading it to the 17B model (which has a massive 500,000 Tokens/Day limit), we save tens of thousands of tokens from the 70B model's daily limit.
+*   **Answer Generation:** `meta-llama/llama-4-scout-17b-16e-instruct`
+    *   *Why:* Generating detailed academic answers consumes up to 15,000+ tokens per paper. The 17B model is highly capable of answering academic questions and its 500K daily limit can easily handle bulk processing 10-12 papers.
+*   **JSON Structuring:** `llama-3.3-70b-versatile`
+    *   *Why:* Parsing complex, messy OCR text into a strict hierarchical JSON tree requires maximum reasoning intelligence. This model is reserved strictly for this step, consuming only ~5,000 tokens per paper, which easily fits within its strict 100,000 Tokens/Day limit across bulk runs.
 
-- **PDF Ingestion** — Renders every page at 200 DPI using PyMuPDF
-- **OCR Pipeline** — Tesseract OCR with adaptive preprocessing for clean text extraction
-- **LLM Cleaning** — Groq Llama-3.3-70b fixes OCR noise, reconstructs split equations
-- **Hierarchical Parsing** — Extracts full Q → Sub-Q → Sub-Sub-Q tree (handles "write short note on any N" patterns)
-- **Diagram Detection** — OpenCV contour detection crops circuit diagrams, tables, and flowcharts precisely
-- **Curiosity Sparks** — AI-generated Real-World Connection, Mind-Blowing Fact, and Curious Quest for each question
-- **Model Answer Sheet** — Parallel 6-key Groq pool solves all questions categorized as Analysis / Define / Justify / Differences / General
-- **PDF Export** — University-style formatted answer PDF with section headings, tables, and marks-aware point counts
-- **Excel Export** — Structured workbook with all question hierarchy levels
-- **Smart Key Rotation** — Detects daily TPD exhaustion vs per-minute rate limits and rotates keys intelligently
+## Pipeline Execution Steps
 
----
+The extraction process is executed in a sequential LangGraph pipeline. Below are the steps and the tools used to achieve them:
 
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Backend | FastAPI + Uvicorn |
-| Agent Orchestration | LangGraph (StateGraph) |
-| LLM | Groq — Llama-3.3-70b-Versatile |
-| OCR | Tesseract via pytesseract |
-| PDF Rendering | PyMuPDF (fitz) |
-| Image Processing | OpenCV + NumPy |
-| PDF Generation | fpdf2 |
-| Excel Generation | openpyxl |
-| Frontend | Vanilla HTML/CSS/JS + marked.js + MathJax |
-
----
-
-## Project Structure
-
-```
-Extracta/
-├── agent.py          # Full agentic pipeline (LangGraph nodes + PDF compiler)
-├── main.py           # FastAPI server + all API endpoints
-├── static/
-│   ├── index.html    # Frontend UI
-│   ├── app.js        # Frontend logic (rendering, polling, sparks, answers)
-│   └── style.css     # Dark-mode premium UI styles
-├── output/           # Generated files (Excel, PDFs, cropped images)
-├── .env              # API keys (NOT committed — see below)
-├── .env.example      # Template for setting up your own keys
-└── requirements.txt  # Python dependencies
-```
-
----
-
-## Setup
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/kelinavipu/Agentic_AI_Question-Paper-Processing-Pipeline.git
-cd Agentic_AI_Question-Paper-Processing-Pipeline
-```
-
-### 2. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Install Tesseract OCR
-
-- **Windows**: Download from [UB Mannheim builds](https://github.com/UB-Mannheim/tesseract/wiki)
-- **Linux**: `sudo apt install tesseract-ocr`
-- **Mac**: `brew install tesseract`
-
-### 4. Configure API Keys
-
-Copy the example env file and fill in your [Groq API keys](https://console.groq.com/):
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
-
-```env
-GROQ_SUMMARY_KEY=gsk_your_summary_key_here
-
-GROQ_EXT1=gsk_your_ext_key_1
-GROQ_EXT2=gsk_your_ext_key_2
-GROQ_EXT3=gsk_your_ext_key_3
-GROQ_EXT4=gsk_your_ext_key_4
-GROQ_EXT5=gsk_your_ext_key_5
-GROQ_EXT6=gsk_your_ext_key_6
-```
-
-### 5. Run
-
-```bash
-python main.py
-```
-
-Open **http://localhost:8000** in your browser.
-
----
-
-## Usage
-
-1. **Upload** a university exam PDF (Mumbai University, generic, etc.)
-2. **Select** your university format
-3. Watch the **live progress pipeline** extract all questions
-4. **Click any sub-question** to see the AI curiosity overview panel
-5. Click **Generate AI Model Answer Sheet** to run the parallel 6-key Groq agent
-6. **Download** the formatted PDF answer sheet or Excel workbook
-
----
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/extract` | Upload PDF and start pipeline |
-| `GET` | `/api/status/{task_id}` | Poll pipeline progress |
-| `GET` | `/api/result/{task_id}` | Get structured question tree |
-| `POST` | `/api/spark` | Generate curiosity spark for a question |
-| `POST` | `/api/answers/{task_id}` | Start parallel model answer generation |
-| `GET` | `/api/answers/status/{task_id}` | Poll answer generation progress |
-| `GET` | `/api/download/{task_id}` | Download Excel workbook |
-| `GET` | `/api/download-answers/{task_id}` | Download model answer PDF |
-| `GET` | `/api/media/{task_id}/{filename}` | Serve cropped diagram images |
-
----
-
-## Environment Variables
-
-| Variable | Purpose |
-|---|---|
-| `GROQ_SUMMARY_KEY` | Used for spark generation, OCR cleaning, header extraction |
-| `GROQ_EXT1`–`GROQ_EXT6` | Rotated pool for question extraction and answer generation |
-
----
-
-## License
-
-MIT — free to use, modify, and distribute.
+1.  **Ingesting PDF (`PyMuPDF / fitz`)**
+    *   Reads the uploaded PDF and renders each page into a high-resolution image. It automatically detects landscape booklets and slices them precisely down the middle to isolate columns and prevent cross-reading.
+2.  **Running OCR (`Tesseract OCR / pytesseract`)**
+    *   Scans the isolated page images and extracts the raw ASCII text using Tesseract.
+3.  **LLM Cleaning (`Groq / Llama 4 Scout 17B`)**
+    *   Processes the raw text to remove noise. Crucially, it deletes garbled Hindi OCR characters while preserving question numbers (e.g., `(i)`) and deduplicating multiple-choice options.
+4.  **Header Extraction (`Regex Pattern Matching`)**
+    *   Extracts critical metadata like Subject, Paper Code, Max Marks, Time, and Date directly from the raw OCR text using regular expressions.
+5.  **Normalization (`Python String Manipulation`)**
+    *   Prepares and sanitizes structural boundaries in the text to assist the LLM in understanding the hierarchy.
+6.  **Groq JSON Structuring (`Groq / Llama 3.3 70B`)**
+    *   The core brain of the pipeline. It reads the cleaned text and outputs a deeply nested JSON tree categorizing questions, sub-questions, MCQs, options, and marks.
+7.  **Cropping Visuals (`OpenCV / cv2` & `PyMuPDF`)**
+    *   Scans the text for visual keywords (e.g., "diagram", "table"). If found, it uses contour detection to locate the visual elements on the page image and crops them as separate image files.
+8.  **Flattening Data (`Recursive Python Function`)**
+    *   Recursively walks the nested JSON tree and flattens it into a 2D tabular format (rows and columns) suitable for a spreadsheet. It defaults missing types to "descriptive" to prevent crashes.
+9.  **Writing Excel (`openpyxl`)**
+    *   Takes the flattened tabular data and generates a cleanly formatted `.xlsx` workbook.
+10. **Verifying (`Validation Logic`)**
+    *   Checks the final extraction to ensure questions were successfully captured. If the extraction failed (e.g., 0 questions extracted), it automatically triggers a retry using the next available API key in the pool.
