@@ -237,7 +237,7 @@ def _run_answers_task(task_id: str):
         
         # 3. Compile report PDF
         agent.update_task_progress(task_id, "answering", 95, "Compiling premium model answer sheet PDF...")
-        pdf_path = agent.compile_answers_pdf(results, header, task_id)
+        pdf_path = agent.compile_answers_pdf(results, header, task_id, result.get("pdf_path", ""))
         
         answers_db[task_id].update({
             "status": "completed",

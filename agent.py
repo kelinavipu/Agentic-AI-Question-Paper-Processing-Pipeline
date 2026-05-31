@@ -1038,9 +1038,9 @@ def excel_writer_node(state: QPState) -> QPState:
     if pdf_path:
         base_name = os.path.basename(pdf_path)
         name_no_ext, _ = os.path.splitext(base_name)
-        out_filename = f"model_answers_{name_no_ext}.xlsx"
+        out_filename = f"sheet_{name_no_ext}.xlsx"
     else:
-        out_filename = f"model_answers_{task_id}.xlsx"
+        out_filename = f"sheet_{task_id}.xlsx"
 
     out_path = os.path.join(OUTPUT_DIR, out_filename)
     wb.save(out_path)
@@ -1829,7 +1829,7 @@ def _render_table(pdf: FPDF, rows: List[List[str]]):
     pdf.ln(4)
 
 
-def compile_answers_pdf(results: List[Dict[str, Any]], header: Dict[str, str], task_id: str) -> str:
+def compile_answers_pdf(results: List[Dict[str, Any]], header: Dict[str, str], task_id: str, pdf_path: str = "") -> str:
     subject = header.get("subject", "Academic Examination")
     pdf = ModelAnswersPDF(subject_title=subject)
     pdf.set_auto_page_break(auto=True, margin=18)
@@ -1926,7 +1926,14 @@ def compile_answers_pdf(results: List[Dict[str, Any]], header: Dict[str, str], t
         pdf.ln(8)
 
 
-    out_path = os.path.join(OUTPUT_DIR, f"{task_id}_answers.pdf")
+    if pdf_path:
+        base_name = os.path.basename(pdf_path)
+        name_no_ext, _ = os.path.splitext(base_name)
+        out_filename = f"model_answers_{name_no_ext}.pdf"
+    else:
+        out_filename = f"model_answers_{task_id}.pdf"
+
+    out_path = os.path.join(OUTPUT_DIR, out_filename)
     pdf.output(out_path)
     return out_path
 
