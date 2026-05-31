@@ -1034,10 +1034,17 @@ def excel_writer_node(state: QPState) -> QPState:
     for col, width in [("A",8),("B",8),("C",8),("D",8),("E",90),("F",8),("G",12),("H",30)]:
         ws.column_dimensions[col].width = width
 
+    pdf_path = state.get("pdf_path", "")
+    if pdf_path:
+        base_name = os.path.basename(pdf_path)
+        name_no_ext, _ = os.path.splitext(base_name)
+        out_filename = f"model_answers_{name_no_ext}.xlsx"
+    else:
+        out_filename = f"model_answers_{task_id}.xlsx"
 
-    out_path = os.path.join(OUTPUT_DIR, f"{task_id}_output.xlsx")
+    out_path = os.path.join(OUTPUT_DIR, out_filename)
     wb.save(out_path)
-    update_task_progress(task_id, "excel_writer", 98, f"Workbook saved: {out_path}")
+    update_task_progress(task_id, "excel_writer", 98, f"Workbook saved: {out_filename}")
     return {**state, "excel_path": out_path,
             "messages": state["messages"] + [AIMessage(content=f"Excel: {out_path}")]}
 
