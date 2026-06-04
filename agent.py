@@ -113,6 +113,8 @@ class QPState(TypedDict):
     retry_count:    int
     messages:       Annotated[List[Any], operator.add]
     errors:         List[str]
+    extract_hindi:  bool
+    hindi_detected: bool
 
 
 # --------------------------------------------------------------------------
@@ -525,20 +527,13 @@ Expected JSON output:
 NOW PARSE THE ACTUAL TEXT BELOW. DO NOT OUTPUT ANY QUESTIONS FROM THE EXAMPLE ABOVE. ONLY OUTPUT THE QUESTIONS FOUND IN THIS TEXT:
 """
 
-def _build_tree_via_llm(text: str, university: str = "generic") -> Dict:
+def _build_tree_via_llm(text: str, university: str = "generic", extract_hindi: bool = False) -> Dict:
     """Use Groq key pool to produce a fully nested JSON question tree."""
-    eng_chars = len(re.findall(r'[a-zA-Z]', text))
-    hin_chars = len(re.findall(r'[\u0900-\u097F]', text))
-    
-    # If Hindi characters are overwhelmingly dominant (e.g., >90% of alphabetical chars)
-    # or there are extremely few English characters, we treat it as a Hindi-only paper.
-    is_hindi_dominant = hin_chars > 0 and (hin_chars > eng_chars * 2)
-
     base_prompt = ABVV_STRUCTURE_PROMPT if university == "abvv" else STRUCTURE_PROMPT
     prompt = base_prompt
     
-    if is_hindi_dominant:
-        prompt += "\n\nCRITICAL RULE OVERRIDE: This paper is overwhelmingly in Hindi. You MUST extract and preserve ALL Hindi question text exactly as written. DO NOT discard it.\n\n"
+    if extract_hindi:
+        prompt += "\n\nCRITICAL RULE OVERRIDE: The user explicitly requested to preserve Hindi text. You MUST extract and preserve ALL Hindi/Devanagari question text exactly as written. DO NOT discard it.\n\n"
     else:
         prompt += "\n\nCRITICAL RULE OVERRIDE: This is a bilingual or English-only paper. Extract ONLY the English text. Discard all Hindi/Devanagari translations. Do NOT include Hindi text in your JSON output.\n\n"
         
@@ -736,8 +731,12 @@ def cleaning_node(state: QPState) -> QPState:
         # structure node, saving tokens and preserving data integrity.
         update_task_progress(task_id, "cleaning", 55, "Skipping LLM cleaning pass to preserve native Hindi OCR...")
 
+    # Detect if Hindi is present in the text to warn the frontend
+    hin_chars = len(re.findall(r'[\u0900-\u097F]', cleaned))
+    hindi_detected = hin_chars > 20
+
     update_task_progress(task_id, "cleaning", 60, f"Cleaning done. {len(cleaned)} chars retained.")
-    return {**state, "clean_text": cleaned,
+    return {**state, "clean_text": cleaned, "hindi_detected": hindi_detected,
             "messages": state["messages"] + [AIMessage(content=f"Cleaning done. {len(cleaned)} chars.")]}
 
 
@@ -812,8 +811,9 @@ def structure_node(state: QPState) -> QPState:
                          "Invoking Groq Llama-3.3-70b for deep hierarchical JSON tree construction...")
 
     normalized = state.get("normalized", "")
+    extract_hindi = state.get("extract_hindi", False)
 
-    tree = _build_tree_via_llm(normalized, university)
+    tree = _build_tree_via_llm(normalized, university, extract_hindi)
     q_count = len(tree)
     update_task_progress(task_id, "structure", 88,
                          f"JSON tree built: {q_count} main question(s) extracted.")
@@ -1084,7 +1084,7 @@ def build_graph() -> StateGraph:
 # PUBLIC ENTRY POINT
 # --------------------------------------------------------------------------
 
-def run_agent_pipeline(pdf_path: str, task_id: str, university: str = "generic") -> QPState:
+def run_agent_pipeline(pdf_path: str, task_id: str, university: str = "generic", extract_hindi: bool = False) -> QPState:
     memory = MemorySaver()
     graph  = build_graph().compile(checkpointer=memory)
 
@@ -1095,6 +1095,8 @@ def run_agent_pipeline(pdf_path: str, task_id: str, university: str = "generic")
         "image_paths":   [],
         "raw_text":      "",
         "clean_text":    "",
+        "extract_hindi": extract_hindi,
+        "hindi_detected": False,
         "header":        {},
         "body_text":     "",
         "normalized":    "",

@@ -65,10 +65,13 @@ def _make_filename_slug(header: dict, task_id: str) -> str:
 # BACKGROUND PIPELINE RUNNER
 # --------------------------------------------------------------------------
 
-def _run_extraction_task(task_id: str, pdf_path: str, university: str):
+def _run_extraction_task(task_id: str, pdf_path: str, university: str, is_extract_hindi: bool = False):
     try:
-        tasks_db[task_id] = {"status": "processing", "progress": 5, "error": None, "result": None}
-        final = run_agent_pipeline(pdf_path, task_id, university)
+        tasks_db[task_id] = {"status": "processing", "progress": 5, "error": None, "result": None, "hindi_detected": False}
+        final = run_agent_pipeline(pdf_path, task_id, university, is_extract_hindi)
+        
+        # Pull Hindi detection flag from final state to update UI
+        tasks_db[task_id]["hindi_detected"] = final.get("hindi_detected", False)
 
         if final.get("validation_ok"):
             tasks_db[task_id].update({
@@ -104,7 +107,8 @@ def _run_extraction_task(task_id: str, pdf_path: str, university: str):
 @app.post("/api/extract")
 async def extract_pdf(
     file: UploadFile = File(...),
-    university: str  = Form("generic")
+    university: str  = Form("generic"),
+    extract_hindi: str = Form("false")
 ):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
@@ -115,7 +119,8 @@ async def extract_pdf(
     with open(pdf_path, "wb") as buf:
         buf.write(await file.read())
 
-    thread = threading.Thread(target=_run_extraction_task, args=(task_id, pdf_path, university))
+    is_extract_hindi = extract_hindi.lower() == "true"
+    thread = threading.Thread(target=_run_extraction_task, args=(task_id, pdf_path, university, is_extract_hindi))
     thread.daemon = True
     thread.start()
 
@@ -143,6 +148,7 @@ async def get_status(task_id: str):
     return {
         "task_id":  task_id,
         "status":   task["status"],
+        "hindi_detected": task.get("hindi_detected", False),
         "node":     current_node,
         "progress": current_progress,
         "message":  current_message,

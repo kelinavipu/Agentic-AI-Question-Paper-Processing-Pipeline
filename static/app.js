@@ -79,8 +79,14 @@ function handleUpload(file) {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("university", selectedUniv);
+    
+    const extractHindi = document.getElementById("extract-hindi-checkbox").checked;
+    formData.append("extract_hindi", extractHindi);
 
     appendLog("system", `University mode: ${selectedUniv.toUpperCase()}`);
+    if (extractHindi) {
+        appendLog("system", `Language: PRESERVE HINDI/DEVANAGARI`);
+    }
 
     fetch("/api/extract", { method: "POST", body: formData })
         .then(r => { if (!r.ok) throw new Error("Upload failed."); return r.json(); })
@@ -139,6 +145,14 @@ function startPolling(taskId) {
                     else if (idx === activeIdx) el.className = "graph-node active";
                     else                        el.className = "graph-node";
                 });
+
+                // Check for Hindi detection suggestion
+                if (data.hindi_detected) {
+                    const cb = document.getElementById("extract-hindi-checkbox");
+                    if (!cb.checked) {
+                        document.getElementById("hindi-suggestion-box").style.display = "block";
+                    }
+                }
 
                 // Append new log lines
                 const logs = data.logs || [];
