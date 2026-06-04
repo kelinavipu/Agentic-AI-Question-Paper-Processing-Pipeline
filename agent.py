@@ -318,6 +318,9 @@ CRITICAL PARSING RULES:
    "Answer any N", "write short note on any N", "explain any N" -> split into child nodes "i","ii"... or "a","b"...
    Parent text = instruction only. Each child = one topic with type="short".
 
+9. TABLES/DATA:
+   If a question contains tabular data, statistical figures, or numeric data matrices, you MUST transcribe and preserve this data in the question text. Do NOT ignore it even if formatting looks messy.
+
 OUTPUT EXAMPLE (SI-003457 style bilingual paper with MCQ + descriptive + OR):
 {
   "Q1": {
@@ -408,7 +411,8 @@ CRITICAL RULES:
 5. If a sub-question has options (a)(b)(c)(d), set type="mcq" and put options in subs as A/B/C/D.
 6. MARKS: "1x5=5" means 5 sub-questions each worth 1 mark. "2x5=10" = 5 sub-questions worth 2 marks each.
 7. OR alternatives: key pattern is Q<N>_OR. Both Q<N> and Q<N>_OR are siblings at top level.
-8. Return ONLY raw JSON. No markdown fences, no explanation.
+8. TABLES/DATA: If a question contains tabular data, statistical figures, or numeric data matrices, you MUST transcribe and preserve this data in the question text. Do NOT ignore it even if formatting looks messy.
+9. Return ONLY raw JSON. No markdown fences, no explanation.
 
 NODE SCHEMA:
 { "text": "<Question text>", "marks": <int or null>, "type": "mcq"|"mcq_option"|"descriptive"|"short", "subs": {} }
@@ -645,11 +649,12 @@ def _clean_text(text: str) -> str:
         if "-----" in line or "=====" in line:
             continue
         # After Hindi strip, lines that are mostly non-alphanumeric are garbage
-        noise = len(re.findall(r"[^a-zA-Z0-9\s\.\)\(:\-/,;%@]", line))
+        # Allow Devanagari block \u0900-\u097F as valid characters
+        noise = len(re.findall(r"[^a-zA-Z0-9\u0900-\u097F\s\.\)\(:\-/,;%@]", line))
         if len(line) > 0 and noise > len(line) * 0.40:
             continue
         # Drop lines that are entirely whitespace/punctuation after stripping
-        if not re.search(r'[a-zA-Z0-9]', line):
+        if not re.search(r'[a-zA-Z0-9\u0900-\u097F]', line):
             continue
         cleaned.append(line)
     return "\n".join(cleaned)
@@ -1579,6 +1584,12 @@ class ModelAnswersPDF(FPDF):
             self.add_font("nirmala", "B", r"C:\Windows\Fonts\nirmalab.ttf")
             self.add_font("nirmala", "I", r"C:\Windows\Fonts\nirmala.ttf")
         self.subject_title = sanitize_for_pdf(subject_title)
+        
+        try:
+            # Enable complex text shaping for Devanagari ligatures
+            self.set_text_shaping(True)
+        except Exception:
+            pass
 
     def header(self):
         self.set_fill_color(15, 23, 42)

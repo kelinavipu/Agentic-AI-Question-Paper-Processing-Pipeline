@@ -22,8 +22,8 @@
     --text-2: #9ca3af;
     --text-3: #6b7280;
 
-    --font-head: 'Outfit', sans-serif;
-    --font-mono: 'JetBrains Mono', monospace;
+    --font-head: 'Outfit', 'Noto Sans Devanagari', sans-serif;
+    --font-mono: 'JetBrains Mono', 'Noto Sans Devanagari', monospace;
 
     --radius-sm: 6px;
     --radius-md: 10px;
