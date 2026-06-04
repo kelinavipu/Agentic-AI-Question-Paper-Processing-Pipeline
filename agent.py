@@ -527,8 +527,22 @@ NOW PARSE THE ACTUAL TEXT BELOW. DO NOT OUTPUT ANY QUESTIONS FROM THE EXAMPLE AB
 
 def _build_tree_via_llm(text: str, university: str = "generic") -> Dict:
     """Use Groq key pool to produce a fully nested JSON question tree."""
+    eng_chars = len(re.findall(r'[a-zA-Z]', text))
+    hin_chars = len(re.findall(r'[\u0900-\u097F]', text))
+    
+    # If Hindi characters are overwhelmingly dominant (e.g., >90% of alphabetical chars)
+    # or there are extremely few English characters, we treat it as a Hindi-only paper.
+    is_hindi_dominant = hin_chars > 0 and (hin_chars > eng_chars * 2)
+
     base_prompt = ABVV_STRUCTURE_PROMPT if university == "abvv" else STRUCTURE_PROMPT
-    prompt = base_prompt + text[:7000]
+    prompt = base_prompt
+    
+    if is_hindi_dominant:
+        prompt += "\n\nCRITICAL RULE OVERRIDE: This paper is overwhelmingly in Hindi. You MUST extract and preserve ALL Hindi question text exactly as written. DO NOT discard it.\n\n"
+    else:
+        prompt += "\n\nCRITICAL RULE OVERRIDE: This is a bilingual or English-only paper. Extract ONLY the English text. Discard all Hindi/Devanagari translations. Do NOT include Hindi text in your JSON output.\n\n"
+        
+    prompt += text[:7000]
 
     for attempt in range(6):  # try each key once
         llm, api_key = groq_pool.get_llm()
