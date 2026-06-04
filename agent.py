@@ -1185,7 +1185,17 @@ def classify_question(text: str, q_type: str = "descriptive") -> str:
     """Classify question for answer generation. Respects pre-tagged MCQ type from LLM parser."""
     if q_type == "mcq":
         return "MCQ"
+    
     t = text.lower()
+    
+    # Detect section headers/instructions (e.g. "Answer any 5", "निम्नलिखित में से...")
+    instruction_keywords = [
+        "answer the following", "attempt any", "answer any", "solve any", 
+        "following questions", "निम्नलिखित", "किन्हीं", "सभी प्रश्नों", "उत्तर दीजिए", "निम्न"
+    ]
+    if len(text.split()) < 25 and any(w in t for w in instruction_keywords) and "?" not in text:
+        return "Instruction"
+
     if any(w in t for w in ["differentiate", "compare", "distinguish", "difference"]):
         return "Differences"
     elif any(w in t for w in ["define", "what is", "explain", "state", "list", "write short note"]):
@@ -1198,6 +1208,14 @@ def classify_question(text: str, q_type: str = "descriptive") -> str:
 
 
 ANSWERS_PROMPTS = {
+    "Instruction": (
+        "You are an academic mentor reviewing an exam paper section.\n"
+        "Section Instruction: '{question}'\n\n"
+        "YOUR TASK: This is an instruction/header, NOT a direct question. "
+        "Do NOT try to 'solve' or 'answer' the instruction itself. "
+        "Write a brief, encouraging 2-sentence overview for the student about what this section tests.\n"
+        "Tone: supportive, academic, professional."
+    ),
     "MCQ": (
         "You are an expert university examiner. A multiple-choice question is given below with its options.\n"
         "Question Stem: '{question}'\n"
