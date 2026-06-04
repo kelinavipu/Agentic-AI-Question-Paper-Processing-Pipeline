@@ -398,8 +398,8 @@ Preserve ALL valid question text in its original language. If a paper is in Hind
 
 NUMBERING CONVENTION OF ABVV PAPERS:
 - Top-level questions: "1." "2." "3." ... (plain digits with a dot) → map to Q1, Q2, Q3...
-- Sub-questions: "(i)" "(ii)" "(iii)" "(iv)" "(v)" → children of the parent question
-- MCQ options: "(a)" "(b)" "(c)" "(d)" → children of the sub-question, type=mcq_option
+- Sub-questions: "(i)" "(ii)" "(iii)" "(iv)" "(v)" OR "(क)" "(ख)" "(ग)" "(घ)" "(ड)" → children of the parent question
+- MCQ options: "(a)" "(b)" "(c)" "(d)" OR "(अ)" "(ब)" "(स)" "(द)" → children of the sub-question, type=mcq_option
 - OR alternative: line containing only "OR" or "अथवा/OR" → next question uses key "Q<N>_OR"
 - Section-A, Section-B, Unit-I, Unit-II → organisational labels, NOT question nodes
 
@@ -407,8 +407,8 @@ CRITICAL RULES:
 1. "1." = Q1. The text AFTER "1." on the same line (or the next non-empty line) is Q1's question text.
 2. "(i)" under Q1 = Q1's first sub-question → key "i". Its text is on the SAME or NEXT line after "(i)".
 3. "(a)" under Q1.i = MCQ option A → {"text":"...","marks":null,"type":"mcq_option","subs":{}}
-4. If a question has sub-questions labeled (i)(ii)(iii)..., it is a CONTAINER — recurse into it.
-5. If a sub-question has options (a)(b)(c)(d), set type="mcq" and put options in subs as A/B/C/D.
+4. If a question has sub-questions labeled (i)(ii)(iii)... or (क)(ख)(ग)..., it is a CONTAINER — recurse into it.
+5. If a sub-question has options (a)(b)(c)(d) or (अ)(ब)(स)(द), set type="mcq" and put options in subs as A/B/C/D.
 6. MARKS: "1x5=5" means 5 sub-questions each worth 1 mark. "2x5=10" = 5 sub-questions worth 2 marks each.
 7. OR alternatives: key pattern is Q<N>_OR. Both Q<N> and Q<N>_OR are siblings at top level.
 8. TABLES/DATA: If a question contains tabular data, statistical figures, or numeric data matrices, you MUST transcribe and preserve this data in the question text. Do NOT ignore it even if formatting looks messy.
