@@ -4,6 +4,7 @@ let selectedUniv    = "mumbai";   // default
 let pollInterval    = null;
 let answersPollInt  = null;
 let activeDiagrams  = [];         // list of diagram filenames from last processed paper
+let uploadedFilename = null;
 
 // Configure marked.js for safe rendering
 if (typeof marked !== "undefined") {
@@ -68,6 +69,8 @@ function handleUpload(file) {
         alert("Only PDF question papers are supported.");
         return;
     }
+
+    uploadedFilename = file.name;
 
     // Switch UI to processing mode
     document.getElementById("upload-zone").classList.add("hidden");
@@ -207,6 +210,7 @@ function renderMetadata(h, university) {
         if (el) el.textContent = val || "—";
     };
 
+    set("meta-filename",   uploadedFilename);
     set("meta-subject",    h.subject);
     set("meta-paper-code", h.paper_code);
     set("meta-max-marks",  h.max_marks ? h.max_marks + " marks" : "");

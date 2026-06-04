@@ -1408,6 +1408,8 @@ def solve_single_question(item: Dict[str, Any]) -> Dict[str, Any]:
         )
         prompt += "\n\nCRITICAL: If the question contains tabular data, statistical numbers, or a Markdown table, you MUST transcribe the table perfectly in your answer and then solve or analyze the data mathematically/statistically as requested."
 
+    prompt += "\n\nCRITICAL LANGUAGE RULE: You MUST answer in the EXACT SAME LANGUAGE as the question text. If the question is written in Hindi (Devanagari script), your ENTIRE model answer MUST be generated in Hindi. If the question is in English, answer in English."
+
     for attempt in range(5):
         llm, api_key = groq_pool.get_llm(model_name="llama-3.3-70b-versatile")
         try:
