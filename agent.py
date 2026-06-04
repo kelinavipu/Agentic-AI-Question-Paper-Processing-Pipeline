@@ -719,38 +719,11 @@ def cleaning_node(state: QPState) -> QPState:
     cleaned = _clean_text(state.get("raw_text", ""))
 
     if len(cleaned) > 100:
-        update_task_progress(task_id, "cleaning", 50, "Groq LLM secondary cleaning pass...")
-        prompt = (
-            "You are an OCR text cleaning assistant for university exam papers.\n"
-            "This paper may contain English, Hindi (Devanagari script), or both. You MUST preserve all valid text in both languages.\n"
-            "If the OCR generated meaningless garbled ASCII noise instead of real words, you should clean it up or remove the noise, but DO NOT delete valid English or Hindi text.\n"
-            "Additional rules:\n"
-            "1. Fix broken words and merge lines split due to two-column layout.\n"
-            "2. Remove page footers, watermarks, header repetitions (like 'SI-003457', 'Turn Over', 'Continued'). Note that the main top header has already been extracted, you can strip it.\n"
-            "3. Preserve question numbers (1., 2., 3... or Q1, Q2...), sub-question labels (i, ii, iii or a, b, c, क, ख, ग), MCQ option labels ((a)(b)(c)(d) or (A)(B)(C)(D) or (अ)(ब)(स)(द)), and marks notation.\n"
-            "4. Preserve Section-A / Section-B / Unit-I / Unit-II / खण्ड-अ headings.\n"
-            "5. Do NOT reorder or rephrase questions. Output the cleaned text in the exact same order.\n"
-            "6. CRITICAL FOR ECONOMICS/MATH: If you detect numerical data, tabular data, or statistical numbers aligned in rows/columns, strictly format them as a Markdown table.\n"
-            "Return ONLY the cleaned text. No preamble or explanations.\n\n"
-            f"TEXT:\n{cleaned[:7000]}"
-        )
-        for attempt in range(6):
-            llm, api_key = groq_pool.get_llm(model_name="meta-llama/llama-4-scout-17b-16e-instruct")
-            try:
-                resp    = llm.invoke([HumanMessage(content=prompt)])
-                cleaned = resp.content.strip()
-                update_task_progress(task_id, "cleaning", 55, "Groq LLM cleaning complete.")
-                break
-            except Exception as e:
-                err = str(e)
-                if '429' in err or 'rate' in err.lower() or 'token' in err.lower():
-                    print(f"  [Cleaning] Key {api_key[:12]}... rate/daily-limited. Trying next.")
-                    groq_pool.handle_error(api_key, err)
-                    continue
-                update_task_progress(task_id, "cleaning", 55, f"LLM cleaning skipped: {e}")
-                break
-        else:
-            update_task_progress(task_id, "cleaning", 55, "LLM cleaning skipped -- all keys rate-limited.")
+        # Note: The secondary LLM cleaning pass was previously deleting valid Hindi text
+        # and aggressively stripping content. Since Tesseract eng+hin now produces clean
+        # Devanagari, we can skip the LLM cleaning and pass the raw text directly to the
+        # structure node, saving tokens and preserving data integrity.
+        update_task_progress(task_id, "cleaning", 55, "Skipping LLM cleaning pass to preserve native Hindi OCR...")
 
     update_task_progress(task_id, "cleaning", 60, f"Cleaning done. {len(cleaned)} chars retained.")
     return {**state, "clean_text": cleaned,
@@ -1427,7 +1400,7 @@ def solve_single_question(item: Dict[str, Any]) -> Dict[str, Any]:
         prompt += "\n\nCRITICAL: If the question contains tabular data, statistical numbers, or a Markdown table, you MUST transcribe the table perfectly in your answer and then solve or analyze the data mathematically/statistically as requested."
 
     for attempt in range(5):
-        llm, api_key = groq_pool.get_llm(model_name="meta-llama/llama-4-scout-17b-16e-instruct")
+        llm, api_key = groq_pool.get_llm(model_name="llama-3.3-70b-versatile")
         try:
             resp = llm.invoke([HumanMessage(content=prompt)])
             return {
