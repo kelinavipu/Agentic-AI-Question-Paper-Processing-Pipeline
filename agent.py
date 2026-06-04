@@ -719,7 +719,7 @@ def ocr_node(state: QPState) -> QPState:
         update_task_progress(task_id, "ocr", 30 + int(i * 8 / len(state["image_paths"])),
                              f"Analyzing page {i+1}...")
         thresh = _preprocess_for_ocr(path)
-        text = pytesseract.image_to_string(thresh, config=OCR_CONFIG)
+        text = pytesseract.image_to_string(thresh, lang="eng+hin", config=OCR_CONFIG)
         full_text += text + "\n"
         print(f"  Page {i+1}: {len(text)} chars")
 
@@ -737,27 +737,18 @@ def cleaning_node(state: QPState) -> QPState:
 
     if len(cleaned) > 100:
         update_task_progress(task_id, "cleaning", 50, "Groq LLM secondary cleaning pass...")
-        is_bilingual = university in ("abvv",)
-        bilingual_note = (
-            "CRITICAL PRIORITY: This is a BILINGUAL exam paper (Hindi + English).\n"
-            "The OCR has scanned BOTH languages, but it lacked Hindi fonts, so Hindi words appear as garbled meaningless ASCII letters (e.g. 'aifeier', 'attat', 'Geren at Seen'). You MUST:\n"
-            "  - REMOVE every Hindi word, sentence, or fragment entirely, including all this meaningless garbled ASCII noise.\n"
-            "  - Keep ONLY the valid English text for each question.\n"
-            "  - IMPORTANT: In bilingual papers, the question number (e.g., '(i)', '1.') is often only written ONCE before the Hindi text. If you delete a garbled Hindi question, YOU MUST PRESERVE its question number and attach it to the English translation!\n"
-            "  - IMPORTANT: If a question has duplicate multiple-choice options (one set for Hindi, one set for English like '(a) 9 (b) 18...' appearing twice), KEEP ONLY ONE SET of options.\n"
-        ) if is_bilingual else (
-            "If any text is written in Hindi (Devanagari script) or garbled ASCII noise, COMPLETELY REMOVE it. Only retain valid English text.\n"
-        )
         prompt = (
             "You are an OCR text cleaning assistant for university exam papers.\n"
-            + bilingual_note +
+            "This paper may contain English, Hindi (Devanagari script), or both. You MUST preserve all valid text in both languages.\n"
+            "If the OCR generated meaningless garbled ASCII noise instead of real words, you should clean it up or remove the noise, but DO NOT delete valid English or Hindi text.\n"
             "Additional rules:\n"
             "1. Fix broken words and merge lines split due to two-column layout.\n"
             "2. Remove page footers, watermarks, header repetitions (like 'SI-003457', 'Turn Over', 'Continued'). Note that the main top header has already been extracted, you can strip it.\n"
-            "3. Preserve question numbers (1., 2., 3... or Q1, Q2...), sub-question labels (i, ii, iii or a, b, c), MCQ option labels ((a)(b)(c)(d) or (A)(B)(C)(D)), and marks notation.\n"
-            "4. Preserve Section-A / Section-B / Unit-I / Unit-II headings.\n"
+            "3. Preserve question numbers (1., 2., 3... or Q1, Q2...), sub-question labels (i, ii, iii or a, b, c, क, ख, ग), MCQ option labels ((a)(b)(c)(d) or (A)(B)(C)(D) or (अ)(ब)(स)(द)), and marks notation.\n"
+            "4. Preserve Section-A / Section-B / Unit-I / Unit-II / खण्ड-अ headings.\n"
             "5. Do NOT reorder or rephrase questions. Output the cleaned text in the exact same order.\n"
-            "Return ONLY the cleaned English text. No preamble or explanations.\n\n"
+            "6. CRITICAL FOR ECONOMICS/MATH: If you detect numerical data, tabular data, or statistical numbers aligned in rows/columns, strictly format them as a Markdown table.\n"
+            "Return ONLY the cleaned text. No preamble or explanations.\n\n"
             f"TEXT:\n{cleaned[:7000]}"
         )
         for attempt in range(6):
@@ -1453,6 +1444,7 @@ def solve_single_question(item: Dict[str, Any]) -> Dict[str, Any]:
             concept1   = concept1,
             concept2   = concept2,
         )
+        prompt += "\n\nCRITICAL: If the question contains tabular data, statistical numbers, or a Markdown table, you MUST transcribe the table perfectly in your answer and then solve or analyze the data mathematically/statistically as requested."
 
     for attempt in range(5):
         llm, api_key = groq_pool.get_llm(model_name="meta-llama/llama-4-scout-17b-16e-instruct")
