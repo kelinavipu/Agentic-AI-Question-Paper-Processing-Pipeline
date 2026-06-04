@@ -282,17 +282,14 @@ CRITICAL PARSING RULES:
    Sub-questions use: i/ii/iii/iv/v (roman) OR a/b/c OR A/B/C (whichever appears).
    MCQ options always use keys A/B/C/D inside "subs" of an MCQ node.
 
-2. BILINGUAL PAPERS (Hindi + English):
-   Many papers print Hindi first, then English for the SAME question.
-   RULE: Extract ONLY the English text. Discard ALL Hindi/Devanagari text completely.
-   Example: ignore "लघु पैमाने की इकाई के निम्न के संदर्भ में मापा" and use only "Small scale unit is measured in terms of:"
+2. BILINGUAL PAPERS (Hindi + English) OR MONOLINGUAL PAPERS:
+   Preserve ALL valid question text in its original language. If a paper is in Hindi, extract the Hindi text. If it is in English, extract the English text. If it is bilingual, extract both as they appear. DO NOT delete Hindi text.
 
 3. MCQ DETECTION:
-   If choices are labeled (a)/(b)/(c)/(d) or (A)/(B)/(C)/(D): it is an MCQ.
+   If choices are labeled (a)/(b)/(c)/(d) or (A)/(B)/(C)/(D) or (अ)/(ब)/(स)/(द): it is an MCQ.
    Set type="mcq". Place each option as a child sub-node with keys A/B/C/D.
-   Parent text = English question stem only (before options).
-   Each option: { "text": "<English only>", "marks": null, "type": "mcq_option", "subs": {} }
-   MCQ options that are bilingual: use ONLY the English option text.
+   Parent text = question stem only (before options).
+   Each option: { "text": "<The option text>", "marks": null, "type": "mcq_option", "subs": {} }
 
 4. ROMAN-NUMERAL SUB-QUESTIONS WITH MCQ OPTIONS:
    Q1 often has sub-questions (i),(ii),(iii),(iv),(v) where each is an MCQ with (a)/(b)/(c)/(d).
@@ -309,7 +306,7 @@ CRITICAL PARSING RULES:
    All Q-numbered questions go directly as top-level keys.
 
 7. NODE SCHEMA:
-   Every node: { "text": "<English only>", "marks": <int or null>, "type": "mcq"|"mcq_option"|"descriptive"|"short", "subs": {} }
+   Every node: { "text": "<Question text>", "marks": <int or null>, "type": "mcq"|"mcq_option"|"descriptive"|"short", "subs": {} }
    Default type = "descriptive" if unclear.
    Marks from: (5) or [5] or "5 marks" or end of line. Per-question integer only.
    Merge OCR-split lines into one clean sentence.
@@ -390,9 +387,9 @@ TEXT TO PARSE:
 """
 
 
-ABVV_STRUCTURE_PROMPT = """You are an expert parser for ABVV (Atal Bihari Vajpayee Vishwavidyalaya) bilingual exam papers.
+ABVV_STRUCTURE_PROMPT = """You are an expert parser for ABVV (Atal Bihari Vajpayee Vishwavidyalaya) exam papers.
 
-This paper has already been cleaned: all Hindi/Devanagari text has been removed. Only English text remains.
+Preserve ALL valid question text in its original language. If a paper is in Hindi, extract the Hindi text. If it is in English, extract the English text. If it is bilingual, extract both as they appear. DO NOT delete Hindi text.
 
 NUMBERING CONVENTION OF ABVV PAPERS:
 - Top-level questions: "1." "2." "3." ... (plain digits with a dot) → map to Q1, Q2, Q3...
@@ -412,7 +409,7 @@ CRITICAL RULES:
 8. Return ONLY raw JSON. No markdown fences, no explanation.
 
 NODE SCHEMA:
-{ "text": "<English only>", "marks": <int or null>, "type": "mcq"|"mcq_option"|"descriptive"|"short", "subs": {} }
+{ "text": "<Question text>", "marks": <int or null>, "type": "mcq"|"mcq_option"|"descriptive"|"short", "subs": {} }
 
 --- EXACT EXAMPLE ONLY (DO NOT COPY THIS INTO YOUR OUTPUT) ---
 The following is purely to demonstrate how the ABVV numbering scheme maps to the JSON structure.
