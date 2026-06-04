@@ -617,20 +617,6 @@ def _preprocess_for_ocr(path: str) -> np.ndarray:
     return thresh
 
 
-# Devanagari and extended Hindi Unicode ranges
-_HINDI_RE = re.compile(
-    r'[\u0900-\u097F'     # Devanagari
-    r'\u0966-\u096F'      # Devanagari digits
-    r'\uA8E0-\uA8FF'     # Devanagari Extended
-    r'\u1CD0-\u1CFF'     # Vedic Extensions
-    r']+'
-)
-
-
-def _strip_hindi(text: str) -> str:
-    """Remove all Devanagari / Hindi Unicode characters from text."""
-    return _HINDI_RE.sub(' ', text)
-
 
 def _reconstruct_bilingual_lines(text: str) -> str:
     """
@@ -645,9 +631,6 @@ def _reconstruct_bilingual_lines(text: str) -> str:
 
 
 def _clean_text(text: str) -> str:
-    # ── Step 0: Strip ALL Devanagari/Hindi Unicode first ──────────────────
-    text = _strip_hindi(text)
-
     cleaned = []
     for line in text.split("\n"):
         line = line.strip()
@@ -814,9 +797,6 @@ def normalization_node(state: QPState) -> QPState:
     update_task_progress(task_id, "normalization", 72,
                          "Normalizing structural boundaries for hierarchical parsing...")
     text = state.get("body_text", "")
-
-    # Final Hindi strip pass in case LLM cleaning left residue
-    text = _strip_hindi(text)
 
     # For bilingual (ABVV) papers: reconstruct split lines so the LLM sees
     # '(i) Small scale unit...' not '(i)\nSmall scale unit...' on separate lines
