@@ -115,6 +115,7 @@ class QPState(TypedDict):
     errors:         List[str]
     extract_hindi:  bool
     hindi_detected: bool
+    original_filename: str
 
 
 # --------------------------------------------------------------------------
@@ -261,12 +262,29 @@ def _extract_header_abvv(text: str) -> Dict[str, str]:
     return h
 
 
-def _extract_header(text: str, university: str = "generic") -> Dict[str, str]:
+def _extract_header(text: str, university: str = "generic", filename: str = "") -> Dict[str, str]:
     if university == "mumbai":
-        return _extract_header_mumbai(text)
-    if university == "abvv":
-        return _extract_header_abvv(text)
-    return _extract_header_generic(text)
+        h = _extract_header_mumbai(text)
+    elif university == "abvv":
+        h = _extract_header_abvv(text)
+    else:
+        h = _extract_header_generic(text)
+
+    # Fallback: extract metadata from the original filename if OCR missed it
+    if filename:
+        fn = filename.lower().replace(".pdf", "")
+        if not h.get("semester"):
+            if m := re.search(r"(\d+)-?sem", fn):
+                h["semester"] = f"SEM-{m.group(1)}"
+        if not h.get("date") and not h.get("exam_session", ""):
+            if m := re.search(r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)-(\d{4})", fn):
+                h["date"] = f"{m.group(1).title()}-{m.group(2)}"
+        if not h.get("paper_code") and not h.get("qp_code"):
+            if m := re.search(r"(si-\d{4,8}|sh-\d{6})", fn):
+                h["qp_code"] = m.group(1).upper()
+                h["paper_code"] = m.group(1).upper()
+
+    return h
 
 
 # --------------------------------------------------------------------------
@@ -754,7 +772,8 @@ def header_extraction_node(state: QPState) -> QPState:
     # Extract header from the raw OCR text (before LLM cleaning) because
     # the LLM often aggressively deletes the header block thinking it's a watermark.
     raw_text = state.get("raw_text", state.get("clean_text", ""))
-    header = _extract_header(raw_text, university)
+    filename = state.get("original_filename", "")
+    header = _extract_header(raw_text, university, filename)
 
     # Separate body text using the LLM-cleaned text so we don't parse garbage
     clean_text = state.get("clean_text", "")
@@ -1080,7 +1099,7 @@ def build_graph() -> StateGraph:
 # PUBLIC ENTRY POINT
 # --------------------------------------------------------------------------
 
-def run_agent_pipeline(pdf_path: str, task_id: str, university: str = "generic", extract_hindi: bool = False) -> QPState:
+def run_agent_pipeline(pdf_path: str, task_id: str, university: str = "generic", extract_hindi: bool = False, original_filename: str = "") -> QPState:
     memory = MemorySaver()
     graph  = build_graph().compile(checkpointer=memory)
 
@@ -1093,6 +1112,7 @@ def run_agent_pipeline(pdf_path: str, task_id: str, university: str = "generic",
         "clean_text":    "",
         "extract_hindi": extract_hindi,
         "hindi_detected": False,
+        "original_filename": original_filename,
         "header":        {},
         "body_text":     "",
         "normalized":    "",
@@ -1814,7 +1834,7 @@ def _render_table(pdf: FPDF, rows: List[List[str]]):
     pdf.ln(4)
 
 
-def compile_answers_pdf(results: List[Dict[str, Any]], header: Dict[str, str], task_id: str, pdf_path: str = "") -> str:
+def compile_answers_pdf(results: List[Dict[str, Any]], header: Dict[str, str], task_id: str, original_filename: str = "") -> str:
     subject = header.get("subject", "Academic Examination")
     pdf = ModelAnswersPDF(subject_title=subject)
     pdf.set_auto_page_break(auto=True, margin=18)
@@ -1911,12 +1931,12 @@ def compile_answers_pdf(results: List[Dict[str, Any]], header: Dict[str, str], t
         pdf.ln(8)
 
 
-    if pdf_path:
-        base_name = os.path.basename(pdf_path)
+    if original_filename:
+        base_name = os.path.basename(original_filename)
         name_no_ext, _ = os.path.splitext(base_name)
-        out_filename = f"model_answers_{name_no_ext}.pdf"
+        out_filename = f"answer_{name_no_ext}.pdf"
     else:
-        out_filename = f"model_answers_{task_id}.pdf"
+        out_filename = f"answer_{task_id}.pdf"
 
     out_path = os.path.join(OUTPUT_DIR, out_filename)
     pdf.output(out_path)

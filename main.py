@@ -65,10 +65,10 @@ def _make_filename_slug(header: dict, task_id: str) -> str:
 # BACKGROUND PIPELINE RUNNER
 # --------------------------------------------------------------------------
 
-def _run_extraction_task(task_id: str, pdf_path: str, university: str, is_extract_hindi: bool = False):
+def _run_extraction_task(task_id: str, pdf_path: str, university: str, is_extract_hindi: bool = False, original_filename: str = ""):
     try:
         tasks_db[task_id] = {"status": "processing", "progress": 5, "error": None, "result": None, "hindi_detected": False}
-        final = run_agent_pipeline(pdf_path, task_id, university, is_extract_hindi)
+        final = run_agent_pipeline(pdf_path, task_id, university, is_extract_hindi, original_filename)
         
         # Pull Hindi detection flag from final state to update UI
         tasks_db[task_id]["hindi_detected"] = final.get("hindi_detected", False)
@@ -84,6 +84,7 @@ def _run_extraction_task(task_id: str, pdf_path: str, university: str, is_extrac
                     "excel_path":       final.get("excel_path", ""),
                     "diagrams":         [os.path.basename(p) for p in final.get("diagram_paths", [])],
                     "university":       final.get("university", "generic"),
+                    "original_filename": final.get("original_filename", ""),
                 }
             })
         else:
@@ -120,7 +121,8 @@ async def extract_pdf(
         buf.write(await file.read())
 
     is_extract_hindi = extract_hindi.lower() == "true"
-    thread = threading.Thread(target=_run_extraction_task, args=(task_id, pdf_path, university, is_extract_hindi))
+    original_filename = file.filename
+    thread = threading.Thread(target=_run_extraction_task, args=(task_id, pdf_path, university, is_extract_hindi, original_filename))
     thread.daemon = True
     thread.start()
 
