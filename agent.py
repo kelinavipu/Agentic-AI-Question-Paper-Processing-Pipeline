@@ -1022,15 +1022,6 @@ def validation_node(state: QPState) -> QPState:
         msg = f"Validation FAILED — will retry (attempt {retry+1})."
 
     summary = ""
-    if LLM_AVAILABLE and ok:
-        try:
-            log = "\n".join(m.content for m in state["messages"] if hasattr(m, "content"))
-            resp = LLM.invoke([HumanMessage(
-                content="Summarise this exam extraction in 2 concise sentences covering subject, question count, and status:\n\n" + log[-2000:]
-            )])
-            summary = resp.content
-        except Exception:
-            pass
 
     update_task_progress(task_id, "validation", 100, msg)
     return {**state,
