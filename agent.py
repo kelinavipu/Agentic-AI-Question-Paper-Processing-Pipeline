@@ -1811,7 +1811,10 @@ def _render_table(pdf: FPDF, rows: List[List[str]]):
     if not rows:
         return
 
-    col_count = max(len(r) for r in rows)
+    col_count = max((len(r) for r in rows), default=0)
+    if col_count == 0:
+        return
+
     page_w    = pdf.w - pdf.l_margin - pdf.r_margin
     col_w     = page_w / col_count
     line_h    = 5
