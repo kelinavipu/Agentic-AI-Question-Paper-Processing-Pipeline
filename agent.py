@@ -52,7 +52,14 @@ def _find_tesseract() -> str:
 
 pytesseract.pytesseract.tesseract_cmd = _find_tesseract()
 
-def build_llm(api_key: str, temp: float = 0.0, model_name: str = "llama-3.3-70b-versatile"):
+# --------------------------------------------------------------------------
+# LLM MODEL LOAD-BALANCING CONSTANTS
+# --------------------------------------------------------------------------
+LLM_CLEANING    = "llama-3.1-8b-instant"
+LLM_ANSWERS     = "llama-3.1-8b-instant"
+LLM_STRUCTURING = "llama-3.3-70b-versatile"
+
+def build_llm(api_key: str, temp: float = 0.0, model_name: str = LLM_STRUCTURING):
     if not api_key:
         return None
     return ChatGroq(model=model_name, temperature=temp, api_key=api_key)
@@ -273,16 +280,35 @@ def _extract_header(text: str, university: str = "generic", filename: str = "") 
     # Fallback: extract metadata from the original filename if OCR missed it
     if filename:
         fn = filename.lower().replace(".pdf", "")
+        
+        # Branch / Degree (e.g., ba, bsc, mcom)
+        if not h.get("branch"):
+            if m := re.match(r"(ba|bsc|bcom|mcom|ma|msc|be|btech|mtech)\b", fn):
+                h["branch"] = m.group(1).upper()
+                
+        # Semester / Part
         if not h.get("semester"):
             if m := re.search(r"(\d+)-?sem", fn):
                 h["semester"] = f"SEM-{m.group(1)}"
+            elif m := re.search(r"part-(\d+)", fn):
+                h["semester"] = f"PART-{m.group(1)}"
+                
+        # Date / Session
         if not h.get("date") and not h.get("exam_session", ""):
             if m := re.search(r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)-(\d{4})", fn):
                 h["date"] = f"{m.group(1).title()}-{m.group(2)}"
+                
+        # Paper Code / QP Code
         if not h.get("paper_code") and not h.get("qp_code"):
-            if m := re.search(r"(si-\d{4,8}|sh-\d{6})", fn):
+            if m := re.search(r"(si-\d{4,8}|sh-\d{6}|\b\d{5,6}\b)", fn):
                 h["qp_code"] = m.group(1).upper()
                 h["paper_code"] = m.group(1).upper()
+                
+        # Subject Name (extracted from between semester and paper code)
+        if not h.get("subject"):
+            m = re.search(r"(?:part-\d+|\d+-sem)-([a-z0-9\-]+)-(?:si-\d+|sh-\d+|\d{5,6})\b", fn)
+            if m:
+                h["subject"] = m.group(1).replace("-", " ").title()
 
     return h
 
@@ -1449,7 +1475,9 @@ def solve_single_question(item: Dict[str, Any]) -> Dict[str, Any]:
     prompt += "\n\nCRITICAL LANGUAGE RULE: You MUST answer in the EXACT SAME LANGUAGE as the question text. If the question is written in Hindi (Devanagari script), your ENTIRE model answer MUST be generated in Hindi. If the question is in English, answer in English."
 
     for attempt in range(5):
-        llm, api_key = groq_pool.get_llm(model_name="llama-3.3-70b-versatile")
+        llm, api_key = groq_pool.get_llm(model_name=LLM_ANSWERS)
+        if not llm:
+            return {**item, "category": category, "answer": "*Error: No API keys available.*"}
         try:
             resp = llm.invoke([HumanMessage(content=prompt)])
             return {
