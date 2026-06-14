@@ -52,14 +52,16 @@ def _find_tesseract() -> str:
 
 pytesseract.pytesseract.tesseract_cmd = _find_tesseract()
 
+import wikipedia
+
 # --------------------------------------------------------------------------
 # LLM MODEL LOAD-BALANCING CONSTANTS
 # --------------------------------------------------------------------------
-LLM_CLEANING    = "llama-3.1-8b-instant"
-LLM_ANSWERS     = "llama-3.1-8b-instant"
-LLM_STRUCTURING = "llama-3.3-70b-versatile"
+LLM_ORCHESTRATOR = "llama-3.1-8b-instant"
+LLM_MATH_CODE    = "deepseek-r1-distill-llama-70b"
+LLM_HINDI        = "llama-3.3-70b-versatile"
 
-def build_llm(api_key: str, temp: float = 0.0, model_name: str = LLM_STRUCTURING):
+def build_llm(api_key: str, temp: float = 0.0, model_name: str = LLM_HINDI):
     if not api_key:
         return None
     return ChatGroq(model=model_name, temperature=temp, api_key=api_key)
@@ -1441,6 +1443,52 @@ def _extract_comparison_concepts(text: str):
     return c1, c2
 
 
+def _fetch_wikipedia_context(query: str) -> str:
+    """Uses Wikipedia to fetch ground-truth context for RAG."""
+    try:
+        results = wikipedia.search(query, results=1)
+        if not results:
+            return ""
+        page = wikipedia.page(results[0], auto_suggest=False)
+        return page.summary[:1500]  # First 1500 chars of summary
+    except Exception as e:
+        print(f"[Wikipedia RAG Error] {e}")
+        return ""
+
+
+def _orchestrate_routing(text: str, marks: int, q_type: str) -> Dict[str, Any]:
+    """Master LLM Orchestrator to decide agent routing and parameters."""
+    prompt = f"""You are the Master Orchestrator for an AI Examination engine.
+Analyze the following question and output a strict JSON configuration.
+
+QUESTION: "{text}"
+MARKS/WEIGHTAGE: {marks}
+TYPE: {q_type}
+
+RULES:
+1. If the question is merely an instruction like "Answer any 5 questions" or "Attempt all questions", set assigned_agent to "IGNORE".
+2. If the question contains heavy mathematics, programming code, or numerical algorithms, set assigned_agent to "MATH_CODE".
+3. If the question is written in Hindi / Devanagari script, set assigned_agent to "HINDI".
+4. Otherwise, set assigned_agent to "GENERAL".
+5. Set required_tokens to "LOW" (marks <=2), "MEDIUM" (marks 3-5), or "HIGH" (marks > 5).
+6. Set requires_research to true ONLY if it's a high-mark descriptive/theoretical question that needs factual Wikipedia context.
+7. Provide a 1-sentence special instruction for the specialized agent.
+
+Respond ONLY with valid JSON. Example:
+{{"assigned_agent": "GENERAL", "required_tokens": "MEDIUM", "requires_research": false, "special_instructions": "Provide a structured explanation."}}
+"""
+    llm, api_key = groq_pool.get_llm(model_name=LLM_ORCHESTRATOR)
+    try:
+        resp = llm.invoke([HumanMessage(content=prompt)])
+        raw = resp.content.strip()
+        raw = re.sub(r'^```(?:json)?\s*', '', raw)
+        raw = re.sub(r'\s*```$', '', raw)
+        return json.loads(raw)
+    except Exception as e:
+        print(f"[Orchestrator Error] {e}")
+        return {"assigned_agent": "GENERAL", "required_tokens": "MEDIUM", "requires_research": False, "special_instructions": ""}
+
+
 def solve_single_question(item: Dict[str, Any]) -> Dict[str, Any]:
     key      = item["key"]
     text     = item["text"]
@@ -1450,6 +1498,36 @@ def solve_single_question(item: Dict[str, Any]) -> Dict[str, Any]:
     category = classify_question(text, q_type)
     num_pts  = _marks_to_points(marks)
 
+    # 1. Orchestrate Routing
+    routing = _orchestrate_routing(text, marks, q_type)
+    assigned_agent = routing.get("assigned_agent", "GENERAL")
+    req_tokens     = routing.get("required_tokens", "MEDIUM")
+    req_research   = routing.get("requires_research", False)
+    spec_instr     = routing.get("special_instructions", "")
+
+    if assigned_agent == "IGNORE":
+        return {
+            "key":      key,
+            "text":     text,
+            "marks":    marks,
+            "category": category,
+            "q_type":   q_type,
+            "options":  options,
+            "answer":   "*(Please refer to the sub-questions below)*"
+        }
+
+    # 2. Fetch Wikipedia RAG Context if needed
+    rag_context = ""
+    if req_research:
+        rag_context = _fetch_wikipedia_context(text)
+
+    # 3. Choose the LLM Model based on assigned agent
+    model_choice = LLM_ORCHESTRATOR # Default
+    if assigned_agent == "MATH_CODE":
+        model_choice = LLM_MATH_CODE
+    elif assigned_agent == "HINDI":
+        model_choice = LLM_HINDI
+    
     # Robustly extract the two concepts for Differences prompts
     concept1, concept2 = _extract_comparison_concepts(text)
 
@@ -1472,10 +1550,14 @@ def solve_single_question(item: Dict[str, Any]) -> Dict[str, Any]:
         )
         prompt += "\n\nCRITICAL: If the question contains tabular data, statistical numbers, or a Markdown table, you MUST transcribe the table perfectly in your answer and then solve or analyze the data mathematically/statistically as requested."
 
-    prompt += "\n\nCRITICAL LANGUAGE RULE: You MUST answer in the EXACT SAME LANGUAGE as the question text. If the question is written in Hindi (Devanagari script), your ENTIRE model answer MUST be generated in Hindi. If the question is in English, answer in English."
+    if rag_context:
+        prompt += f"\n\nGROUND TRUTH RESEARCH CONTEXT:\n{rag_context}\nUse this context to ensure high factual accuracy."
+    
+    if spec_instr:
+        prompt += f"\n\nORCHESTRATOR INSTRUCTION: {spec_instr}"
 
     for attempt in range(5):
-        llm, api_key = groq_pool.get_llm(model_name=LLM_ANSWERS)
+        llm, api_key = groq_pool.get_llm(model_name=model_choice)
         if not llm:
             return {**item, "category": category, "answer": "*Error: No API keys available.*"}
         try:
