@@ -1481,8 +1481,10 @@ Respond ONLY with valid JSON. Example:
     try:
         resp = llm.invoke([HumanMessage(content=prompt)])
         raw = resp.content.strip()
-        raw = re.sub(r'^```(?:json)?\s*', '', raw)
-        raw = re.sub(r'\s*```$', '', raw)
+        start = raw.find('{')
+        end = raw.rfind('}')
+        if start != -1 and end != -1:
+            raw = raw[start:end+1]
         return json.loads(raw)
     except Exception as e:
         print(f"[Orchestrator Error] {e}")
