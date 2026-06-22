@@ -1466,7 +1466,7 @@ MARKS/WEIGHTAGE: {marks}
 TYPE: {q_type}
 
 RULES:
-1. If the question is merely an instruction like "Answer any 5 questions" or "Attempt all questions", set assigned_agent to "IGNORE".
+1. CRITICAL: If the question text is merely an instruction or heading (e.g., "Answer any 5 questions", "Attempt all questions", "Answer the following objective questions", "Section A"), you MUST set assigned_agent to "IGNORE".
 2. If the question contains heavy mathematics, programming code, or numerical algorithms, set assigned_agent to "MATH_CODE".
 3. If the question is written in Hindi / Devanagari script, set assigned_agent to "HINDI".
 4. Otherwise, set assigned_agent to "GENERAL".
